@@ -6,6 +6,8 @@ RomManager is a standalone terminal engine, asset scraper, and direct network ha
 
 Most scene tools out there are either bloated, depend on heavy runtime environments, or completely break when trying to match game titles with box art databases. RomManager fixes all of that. It runs on a lightweight, shell-driven graphics architecture to parse massive multi-thousand game lists with absolute zero menu lag, working natively with the screen display buffer.
 
+<img width="640" height="480" align="center" alt="MainUI_001" src="https://github.com/user-attachments/assets/aca9bd1c-e3b0-4131-949b-d9c51f6cd6cd" />
+
 ---
 
 ## Core Features
@@ -28,8 +30,6 @@ Most scene tools out there are either bloated, depend on heavy runtime environme
 ---
 
 ## Screenshots
-
-<img width="640" height="480" alt="MainUI_001" src="https://github.com/user-attachments/assets/aca9bd1c-e3b0-4131-949b-d9c51f6cd6cd" />
 
 <img width="640" height="480" alt="RomManager_001" src="https://github.com/user-attachments/assets/9e896097-6467-4ab3-9656-23e792235b26" />\\
 
