@@ -14,7 +14,7 @@ Most scene tools out there are either bloated, depend on heavy runtime environme
 * **Universal Naming Translation Layer:** Built with a regex matching engine that cleans up titles for every single console database on the fly. It automatically strips out messy metadata distribution junk (like `[!]`, `[C]`, or bad bracket text) and converts single-letter region tags (like `(U)`, `(E)`, or `(J)`) into full standard words (`(USA)`, `(Europe)`, `(Japan)`). This ensures naming formats align perfectly with web artwork databases.
 * **Dynamic Art Scraping:** Built-in automated asset fetching. When you pull a new game down, the scraper instantly runs the translated title through external Libretro thumbnail servers to track down, grab, and map the correct cover art in real-time.
 * **Live Graphical Preview Canvas:** Features a localized display painter that grabs high-resolution box art from your console directories and pulls it right onto your screen. Whether you are checking local storage files or hovering over a remote download option, you get an instant visual preview of the actual game cover.
-* **Buttery Smooth D-Pad Scrolling:** Heavy CPU menu throttling is completely eliminated. The app locks down all system pathways, local files, and directory counts into clean static cache maps on boot. Scrolling through lists reads straight from these pre-built cache logs, meaning absolutely zero input delay on lower-power ARM chips.
+* **Smooth D-Pad Scrolling:** Heavy CPU menu throttling is completely eliminated. The app locks down all system pathways, local files, and directory counts into clean static cache maps on boot. Scrolling through lists reads straight from these pre-built cache logs, meaning absolutely zero input delay on lower-power ARM chips.
 * **On-Screen Keyboard Search:** Tap `Select` inside any massive file menu to summon a responsive letter matrix screen, allowing you to instantly type out custom search query strings and filter down endless game sets to exactly what you want.
 * **Local Handheld Cleaning:** A dedicated local directory deck lets you inspect exactly what is on your system storage, run a focused art scrape on a single game with a missing cover, or permanently delete unwanted files and matching artwork to reclaim space instantly.
 
@@ -31,6 +31,7 @@ Most scene tools out there are either bloated, depend on heavy runtime environme
 
 For deployment inside OnionOS, the application folder structure looks like this:
 
+```text
 /mnt/SDCARD/App/RomManager/
 ├── bin/                    # Helper binaries mapping controls and screen text painting
 │   ├── getkey              # Hardware button tracker
@@ -42,6 +43,8 @@ For deployment inside OnionOS, the application folder structure looks like this:
 ├── caches/                 # Pre-built system maps, search logs, and preview graphics
 ├── archives.txt            # System configuration database linking local paths to Repo IDs
 └── launch.sh               # Main application launch execution script
+
+```
 
 ---
 
@@ -80,8 +83,8 @@ This completely purges the local database list for that specific console without
 
 | Hardware Key | Navigation Menu Context | On-Screen Keyboard Context |
 | --- | --- | --- |
-| **D-Pad Up / Down** | Scroll highlighted list option indices | Navigate 2D matrix selection cursor |
-| **D-Pad Left / Right** | Page flip skip list blocks up or down | Navigate 2D matrix selection cursor |
+| **D-Pad Up / Down** | Scroll highlighted list option indices | Move cursor across 2D matrix selection cursor |
+| **D-Pad Left / Right** | Page flip skip list blocks up or down | Move cursor across 2D matrix selection cursor |
 | **Button A** | Confirm Selection / Trigger Download / Start Scrape | Write highlighted text token to string |
 | **Button B** | Return to previous state layer view | Delete trailing string buffer character |
 | **Start** | Toggle Selected Game into Favorites / Unfavorite | Commit active text search query to index |
@@ -105,8 +108,8 @@ Internal app settings configure automatically through your system configurations
 
 ## Acknowledgments
 
-This entire project was designed, built, tested, and debugged solo over a single high-intensity 40-hour weekend sprint.
+This entire project was designed, built, tested, and debugged solo as an adhd special intrest after realizing i something like this didnt exist.
 
-Shout out to the open-source emulation developers whose documentation made decoding the key registers and mapping the regex translation rules possible.
+Shout out to the open-source emulation developers whose documentation made things possible.
 
 Developed by plusCloud
