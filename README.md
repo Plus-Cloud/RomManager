@@ -8,17 +8,6 @@ Most scene tools out there are either bloated, depend on heavy runtime environme
 
 ---
 
-## Screenshots
-
-<img width="640" height="480" alt="MainUI_001" src="https://github.com/user-attachments/assets/aca9bd1c-e3b0-4131-949b-d9c51f6cd6cd" />
-
-<img width="640" height="480" alt="RomManager_001" src="https://github.com/user-attachments/assets/9e896097-6467-4ab3-9656-23e792235b26" />\\
-
-<img width="640" height="480" alt="RomManager_004" src="https://github.com/user-attachments/assets/17dd250f-a1c6-48ba-ac48-683eb14d1ac8" />
-
-
----
-
 ## Core Features
 
 * **PC-Free Game Harvesting:** Link up to your Miyoo's local Wi-Fi to browse, stream, and download game packages from public internet archives directly to your system ROM directories.
@@ -35,6 +24,17 @@ Most scene tools out there are either bloated, depend on heavy runtime environme
 * **Track Interruption Recovery:** The script saves live audio tracking coordinates to a state log (`/tmp/bgm_position`) when menu sound effects ring out. The background loop resumes from the exact second it left off instead of restarting the song from the beginning.
 * **Clean Suffix Extension Slicing:** Keeps the display menus completely clean by stripping raw file extensions (`.zip`, `.gbc`, `.chd`, `.7z`) across all folders before writing text lines to the display canvas.
 * **Cross-Platform Bookmarking:** A global cross-platform tracker file (`favorites.txt`) allows you to favorite your preferred game titles across completely different emulator paths for fast navigation.
+
+---
+
+## Screenshots
+
+<img width="640" height="480" alt="MainUI_001" src="https://github.com/user-attachments/assets/aca9bd1c-e3b0-4131-949b-d9c51f6cd6cd" />
+
+<img width="640" height="480" alt="RomManager_001" src="https://github.com/user-attachments/assets/9e896097-6467-4ab3-9656-23e792235b26" />\\
+
+<img width="640" height="480" alt="RomManager_004" src="https://github.com/user-attachments/assets/17dd250f-a1c6-48ba-ac48-683eb14d1ac8" />
+
 
 ---
 
