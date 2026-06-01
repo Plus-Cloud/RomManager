@@ -1,0 +1,6 @@
+{
+"label":"RomManager",
+"icon":	"icon.png",
+"launch":"launch.sh",
+"description":"The ultimate all-in-one ROM manager"
+}
