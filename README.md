@@ -42,7 +42,7 @@ Most scene tools out there are either bloated, depend on heavy runtime environme
 
 For deployment inside OnionOS, the application folder structure looks like this:
 
-```text
+```
 /mnt/SDCARD/App/RomManager/
 ├── bin/                    # Helper binaries mapping controls and screen text painting
 │   ├── getkey              # Hardware button tracker
@@ -82,11 +82,10 @@ This completely purges the local database list for that specific console without
 
 ## Installation
 
-1. Clean out your project space before transferring—delete any loose temporary settings, your local `settings.ini`, or populated test files inside the `caches/` folder.
-2. Download the `RomManager` zip archive from the releases tab on GitHub.
-3. Open the zip file, grab the inner `RomManager` folder, and drag it directly into the App directory on your Miyoo's SD card:
-`/mnt/SDCARD/App/RomManager/`
-4. Unmount your SD card safely, slide it into your Miyoo Mini / Plus, boot up the handheld, and launch it straight from your Apps selection page. OnionOS will automatically configure execution permissions on first launch.
+1. Download the `RomManager` zip archive from the releases tab on GitHub.
+2. Open the zip file, grab the inner `RomManager` folder, and drag it directly into the App directory on your Miyoo's SD card:
+`/SDCARD/App/RomManager/`
+3. Unmount your SD card safely, slide it into your Miyoo Mini / Plus, boot up the handheld, and launch it straight from your Apps selection page. OnionOS will automatically configure execution permissions on first launch.
 
 ---
 
