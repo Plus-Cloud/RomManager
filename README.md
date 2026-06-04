@@ -65,7 +65,9 @@ RomManager does not host, share, or bundle any copyrighted digital files or game
 
 Selecting **Manage Repositories** from the main menu brings up your global backend deck. This screen lists every system folder on your SD card alongside its active internet repository target. If a system hasn't been set up yet, it will display a blank `ADD REPO` tag.
 
-​## Managing Repositories
+---
+
+​## Managing Repositories:
 ​Connecting a New Storage ID
 ​Select the Platform: Navigate to your desired console category and press Button A to open the digital keyboard.
 ​Enter the Unique Identifier: Input the precise, case-sensitive ID of the online repository mapped to that specific console.
