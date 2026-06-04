@@ -65,12 +65,15 @@ RomManager does not host, share, or bundle any copyrighted digital files or game
 
 Selecting **Manage Repositories** from the main menu brings up your global backend deck. This screen lists every system folder on your SD card alongside its active internet repository target. If a system hasn't been set up yet, it will display a blank `ADD REPO` tag.
 
-### Linking an Internet Archive ID:
-
-1. Scroll to your target console (e.g., `GBC`) and press **Button A**. This fires up the On-Screen Keyboard.
-2. Type out the exact, case-sensitive **Identifier** of the Internet Archive item you want to crawl. For example, if the archive URL is `[https://archive.org/details/gbc-no-intro-2026](https://archive.org/details/gbc-no-intro-2026)`, you will type: `gbc-no-intro-2026`.
-3. Press **Start** to save. The engine will instantly run a background handshake check to ping the server and verify the ID has a valid file table.
-4. If validated, the repository is linked permanently, and selecting that console in the main download menu will instantly populate its live directory list.
+​## Managing Repositories
+​Connecting a New Storage ID
+​Select the Platform: Navigate to your desired console category and press Button A to open the digital keyboard.
+​Enter the Unique Identifier: Input the precise, case-sensitive ID of the online repository mapped to that specific console.
+​Example: If the target web address for your console's files is [https://archive.org/details/homebrew-console-pack](https://archive.org/details/homebrew-console-pack), the exact string you need to enter is homebrew-console-pack.
+​Commit the Changes: Press the Start button to save your input.
+​Automated Validation and Storage
+​Once saved, the system automatically initiates a background handshake to ping the remote host and confirm the directory structure for that specific console is valid.
+​Upon successful verification, the repository links permanently to your system. Selecting that specific console from the primary download interface will now automatically generate and display its current file directory..
 
 ### Maintenance and Cache Management:
 
