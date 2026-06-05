@@ -1,16 +1,16 @@
----
-
 # RomManager
 
 RomManager is a standalone terminal engine, asset scraper, and direct network harvester built specifically for the Miyoo Mini and Miyoo Mini Plus running OnionOS. Operating directly from your applications directory, it drops a sleek menu wrapper over your handheld, giving you the power to crawl public internet archives, download game files directly over Wi-Fi, and manage your local collection on the fly without ever pulling your SD card or connecting to a PC.
 
 Most scene tools out there are either bloated, depend on heavy runtime environments, or completely break when trying to match game titles with box art databases. RomManager fixes all of that. It runs on a lightweight, shell-driven graphics architecture to parse massive multi-thousand game lists with absolute zero menu lag, working natively with the screen display buffer.
 
-<img width="640" height="480" align="center" alt="MainUI_001" src="https://github.com/user-attachments/assets/aca9bd1c-e3b0-4131-949b-d9c51f6cd6cd" />
+<p align="center">
+  <img width="640" height="480" alt="MainUI_001" src="https://github.com/user-attachments/assets/aca9bd1c-e3b0-4131-949b-d9c51f6cd6cd" />
+</p>
 
 ---
 
-## Core Features
+## 🚀 Core Features
 
 * **PC-Free Game Harvesting:** Link up to your Miyoo's local Wi-Fi to browse, stream, and download game packages from public internet archives directly to your system ROM directories.
 * **Universal Naming Translation Layer:** Built with a regex matching engine that cleans up titles for every single console database on the fly. It automatically strips out messy metadata distribution junk (like `[!]`, `[C]`, or bad bracket text) and converts single-letter region tags (like `(U)`, `(E)`, or `(J)`) into full standard words (`(USA)`, `(Europe)`, `(Japan)`). This ensures naming formats align perfectly with web artwork databases.
@@ -20,7 +20,7 @@ Most scene tools out there are either bloated, depend on heavy runtime environme
 * **On-Screen Keyboard Search:** Tap `Select` inside any massive file menu to summon a responsive letter matrix screen, allowing you to instantly type out custom search query strings and filter down endless game sets to exactly what you want.
 * **Local Handheld Cleaning:** A dedicated local directory deck lets you inspect exactly what is on your system storage, run a focused art scrape on a single game with a missing cover, or permanently delete unwanted files and matching artwork to reclaim space instantly.
 
-## Secondary Mechanics
+### 🛠️ Secondary Mechanics
 
 * **Background Soundtrack Loop & Menu FX:** Integrated audio tracking handling background loops and sharp physical button audio feedback.
 * **Track Interruption Recovery:** The script saves live audio tracking coordinates to a state log (`/tmp/bgm_position`) when menu sound effects ring out. The background loop resumes from the exact second it left off instead of restarting the song from the beginning.
@@ -29,20 +29,21 @@ Most scene tools out there are either bloated, depend on heavy runtime environme
 
 ---
 
-## Screenshots
+## 📸 Screenshots
 
-<img width="640" height="480" alt="RomManager_001" src="https://github.com/user-attachments/assets/9e896097-6467-4ab3-9656-23e792235b26" />\\
-
-<img width="640" height="480" alt="RomManager_004" src="https://github.com/user-attachments/assets/17dd250f-a1c6-48ba-ac48-683eb14d1ac8" />
-
+<p align="center">
+  <img width="640" height="480" alt="RomManager_001" src="https://github.com/user-attachments/assets/9e896097-6467-4ab3-9656-23e792235b26" />
+  <br><br>
+  <img width="640" height="480" alt="RomManager_004" src="https://github.com/user-attachments/assets/17dd250f-a1c6-48ba-ac48-683eb14d1ac8" />
+</p>
 
 ---
 
-## Directory & Architecture Map
+## 📁 Directory & Architecture Map
 
 For deployment inside OnionOS, the application folder structure looks like this:
 
-```
+```bash
 /mnt/SDCARD/App/RomManager/
 ├── bin/                    # Helper binaries mapping controls and screen text painting
 │   ├── getkey              # Hardware button tracker
@@ -53,31 +54,30 @@ For deployment inside OnionOS, the application folder structure looks like this:
 ├── ui/                     # Device font sheets and terminal wallpaper art assets
 ├── caches/                 # Pre-built system maps, search logs, and preview graphics
 ├── archives.txt            # System configuration database linking local paths to Repo IDs
-└── launch.sh               # Main application launch execution script
+└── launch.sh               # Main application launch execution script 
 
 ```
 
 ---
 
-## Operating the Repository Menu
+## 🗺️ Operating the Repository Menu
 
-RomManager does not host, share, or bundle any copyrighted digital files or game data. Every network pass is driven entirely by the database targets you link inside the app.
+> ⚠️ **Disclaimer:** RomManager does not host, share, or bundle any copyrighted digital files or game data. Every network pass is driven entirely by the database targets you link inside the app.
 
 Selecting **Manage Repositories** from the main menu brings up your global backend deck. This screen lists every system folder on your SD card alongside its active internet repository target. If a system hasn't been set up yet, it will display a blank `ADD REPO` tag.
 
 ---
 
-​## Managing Repositories:
-​Connecting a New Storage ID
-​Select the Platform: Navigate to your desired console category and press Button A to open the digital keyboard.
-​Enter the Unique Identifier: Input the precise, case-sensitive ID of the online repository mapped to that specific console.
-​Example: If the target web address for your console's files is [https://archive.org/details/homebrew-console-pack](https://archive.org/details/homebrew-console-pack), the exact string you need to enter is homebrew-console-pack.
-​Commit the Changes: Press the Start button to save your input.
-​Automated Validation and Storage
-​Once saved, the system automatically initiates a background handshake to ping the remote host and confirm the directory structure for that specific console is valid.
-​Upon successful verification, the repository links permanently to your system. Selecting that specific console from the primary download interface will now automatically generate and display its current file directory..
+* **Select the Platform:** Navigate to your desired console category and press **Button A** to open the digital keyboard.
+* **Enter the Unique Identifier:** Input the precise, case-sensitive ID of the online repository mapped to that specific console.
+* *Example:* If the target web address for your console's files is `https://archive.org/details/homebrew-console-pack`, the exact string you need to enter is `homebrew-console-pack`.
 
-### Maintenance and Cache Management:
+
+* **Commit the Changes:** Press the **Start** button to save your input.
+
+Once saved, the system automatically initiates a background handshake to ping the remote host and confirm the directory structure for that specific console is valid.
+
+Upon successful verification, the repository links permanently to your system. Selecting that specific console from the primary download interface will now automatically generate and display its current file directory.
 
 Internet Archive data can change or update. If you notice a repo has added new games or changed its layout, navigate back to **Manage Repositories**, highlight that system, and press **Button Y**.
 
@@ -85,16 +85,21 @@ This completely purges the local database list for that specific console without
 
 ---
 
-## Installation
+## 💾 Installation
 
 1. Download the `RomManager` zip archive from the releases tab on GitHub.
 2. Open the zip file, grab the inner `RomManager` folder, and drag it directly into the App directory on your Miyoo's SD card:
-`/SDCARD/App/RomManager/`
+
+```text
+   /SDCARD/App/RomManager/
+
+```
+
 3. Unmount your SD card safely, slide it into your Miyoo Mini / Plus, boot up the handheld, and launch it straight from your Apps selection page. OnionOS will automatically configure execution permissions on first launch.
 
 ---
 
-## Handheld Control Layout Reference
+## 🎮 Handheld Control Layout Reference
 
 | Hardware Key | Navigation Menu Context | On-Screen Keyboard Context |
 | --- | --- | --- |
@@ -110,7 +115,7 @@ This completely purges the local database list for that specific console without
 
 ---
 
-## Operational Suffix Modifiers (`settings.ini`)
+## ⚙️ Operational Suffix Modifiers (`settings.ini`)
 
 Internal app settings configure automatically through your system configurations screen or can be edited directly inside `settings.ini`:
 
@@ -121,10 +126,11 @@ Internal app settings configure automatically through your system configurations
 
 ---
 
-## Acknowledgments
+## 🤝 Acknowledgments
 
-This entire project was designed, built, tested, and debugged solo as an adhd special intrest after realizing i something like this didnt exist.
+This entire project was designed, built, tested, and debugged solo as an ADHD special interest after realizing something like this didn't exist.
 
 Shout out to the open-source emulation developers whose documentation made things possible.
 
-Developed by plusCloud
+Developed by **plusCloud**
+
