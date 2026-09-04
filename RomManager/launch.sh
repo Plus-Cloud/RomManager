@@ -327,12 +327,12 @@ url_decode() {
 # ==========================================
 
 get_libretro_system() {
-    case "$1" in
+    local folder_key=$(echo "$1" | tr '[:lower:]' '[:upper:]')
+    case "$folder_key" in
         "GBA") echo "Nintendo%20-%20Game%20Boy%20Advance" ;;
         "PS") echo "Sony%20-%20PlayStation" ;;
         "FC") echo "Nintendo%20-%20Nintendo%20Entertainment%20System" ;;
-        "SFC"|"SNES") echo "Nintendo%20-%20Super%20Nintendo%20Entertainment%20System" ;;
-        "SATELLAVIEW") echo "Nintendo%20-%20Satellaview" ;;
+        "SFC"|"SNES"|SATELLAVIEW) echo "Nintendo%20-%20Super%20Nintendo%20Entertainment%20System" ;;
         "GB") echo "Nintendo%20-%20Game%20Boy" ;;
         "GBC") echo "Nintendo%20-%20Game%20Boy%20Color" ;;
         "MD") echo "Sega%20-%20Mega%20Drive%20-%20Genesis" ;;
@@ -351,10 +351,10 @@ get_libretro_system() {
 # dumps, or PS1 .bin (its .cue pair is fetched automatically at download time), without the
 # user having to know or configure it per repo.
 get_auto_extensions() {
-    case "$1" in
+    local folder_key=$(echo "$1" | tr '[:lower:]' '[:upper:]')
+    case "$folder_key" in
         FC|NES) echo "nes" ;;
-        SFC|SNES) echo "smc|sfc" ;;
-        SATELLAVIEW) echo "bs" ;;
+        SFC|SNES|SATELLAVIEW) echo "smc|sfc|bs" ;;
         GB|SGB) echo "gb" ;;
         GBC) echo "gbc" ;;
         GBA) echo "gba" ;;
