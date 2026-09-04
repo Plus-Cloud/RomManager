@@ -292,6 +292,35 @@ toggle_favorite() {
     sed -i '/^$/d' "$FAV_FILE"
 }
 
+url_decode() {
+    printf '%s' "$1" | awk '
+        function hexval(c) {
+            if (c ~ /[0-9]/) return c + 0
+            c = toupper(c)
+            if (c == "A") return 10
+            if (c == "B") return 11
+            if (c == "C") return 12
+            if (c == "D") return 13
+            if (c == "E") return 14
+            if (c == "F") return 15
+            return 0
+        }
+        {
+            s = $0
+            result = ""
+            for (i = 1; i <= length(s); i++) {
+                c = substr(s, i, 1)
+                if (c == "%" && i + 2 <= length(s)) {
+                    result = result sprintf("%c", hexval(substr(s, i+1, 1)) * 16 + hexval(substr(s, i+2, 1)))
+                    i += 2
+                } else {
+                    result = result c
+                }
+            }
+            printf "%s", result
+        }'
+}
+
 # ==========================================
 # 5. DATA LOGIC HELPERS
 # ==========================================
