@@ -448,6 +448,79 @@ fetch_libretro_art() {
     fi
 }
 
+fetch_libretro_art_preview() {
+    local sys="$1"
+    local base="$2"
+    local out="$3"
+    [ -z "$sys" ] && return 1
+    if fetch_libretro_art "$sys" "$base" "$out" "1"; then
+        return 0
+    else
+        touch "${out}.none"
+        return 1
+    fi
+}
+
+# Scrapes an archive.org item's file listing and writes a decoded "title|raw_filename|Unknown MB|0"
+# cache file (title is percent-decoded and extension-stripped for display; raw_filename stays
+# percent-encoded, since it's used verbatim to build download URLs). Shared by the repo browser
+# (FETCH_XML) and the bulk cover prefetcher, so both cache identically-shaped list files.
+fetch_repo_list() {
+    local archive_id="$1"
+    local ext="$2"
+    local out_file="$3"
+    local folder="$4"
+
+    local ext_regex="zip|7z|rar|chd"
+    local auto_ext=$(get_auto_extensions "$folder")
+    [ -n "$auto_ext" ] && ext_regex="${auto_ext}|${ext_regex}"
+    [ -n "$ext" ] && ext_regex="${ext}|${ext_regex}"
+
+    local tmp_list="$CACHE_DIR/.tmp_repo_list_$$"
+    curl -s -L -k --retry 2 --connect-timeout 8 -m 30 "https://archive.org/download/${archive_id}/" \
+        | grep -iEo 'href="[^"]*\.('"$ext_regex"')[^"]*"' \
+        | cut -d'"' -f2 > "$tmp_list"
+
+    if [ -s "$tmp_list" ]; then
+        awk '
+            function hexval(c) {
+                if (c ~ /[0-9]/) return c + 0
+                c = toupper(c)
+                if (c == "A") return 10
+                if (c == "B") return 11
+                if (c == "C") return 12
+                if (c == "D") return 13
+                if (c == "E") return 14
+                if (c == "F") return 15
+                return 0
+            }
+            function urldecode(s,    result, i, c) {
+                result = ""
+                for (i = 1; i <= length(s); i++) {
+                    c = substr(s, i, 1)
+                    if (c == "%" && i + 2 <= length(s)) {
+                        result = result sprintf("%c", hexval(substr(s, i+1, 1)) * 16 + hexval(substr(s, i+2, 1)))
+                        i += 2
+                    } else {
+                        result = result c
+                    }
+                }
+                return result
+            }
+            {
+                filename = $0;
+                title = filename;
+                sub(/^.*\//, "", title);
+                sub(/\.[^.]+$/, "", title);
+                title = urldecode(title);
+                print title "|" filename "|Unknown MB|0";
+            }
+        ' "$tmp_list" | sort -u > "$out_file"
+    fi
+    rm -f "$tmp_list"
+    [ -s "$out_file" ]
+}
+
 update_local_consoles() {
     [ -f "$CACHE_DIR/local_consoles.cache" ] && return
     
@@ -717,21 +790,16 @@ state_fetch_xml() {
     UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Connecting to Server...\nPROGRESS:0\n"
     render_ui
 
-    local ext_regex="zip|7z|rar|chd"
-    [ -n "$DL_EXT" ] && ext_regex="${DL_EXT}|${ext_regex}"
+    local cache_file="$CACHE_DIR/${DL_ARCHIVE_ID}.list"
 
     rm -f /tmp/xml_active /tmp/xml_cancel
-    touch /tmp/xml_active
-    rm -f "$CACHE_DIR/tmp_files.txt"
-    
+
     (
-        curl -s -L -k --retry 2 --connect-timeout 8 -m 30 "https://archive.org/download/${DL_ARCHIVE_ID}/" \
-        | grep -iEo 'href="[^"]*\.('"$ext_regex"')[^"]*"' \
-        | cut -d'"' -f2 > "$CACHE_DIR/tmp_files.txt"
+        fetch_repo_list "$DL_ARCHIVE_ID" "$DL_EXT" "$cache_file" "$DL_CHOSEN_FOLDER"
         rm -f /tmp/xml_active
     ) &
     local curl_pid=$!
-    
+
     (
         while [ -f /tmp/xml_active ]; do
             k=$(./bin/getkey)
@@ -742,53 +810,36 @@ state_fetch_xml() {
         done
     ) &
     local key_pid=$!
-    
+
     local prog_val=0
     local spin_idx=0
-    
+
     while [ -f /tmp/xml_active ]; do
         if [ -f /tmp/xml_cancel ]; then
             play_sound "back"
             kill -9 $curl_pid 2>/dev/null
-            rm -f /tmp/xml_active "$CACHE_DIR/tmp_files.txt" /tmp/xml_cancel
+            rm -f /tmp/xml_active "$cache_file" /tmp/xml_cancel
             STATE="DL_CONSOLES"
             UI_RENDER_NEEDED=1
             kill -9 $key_pid 2>/dev/null
             return
         fi
-        
+
         spin_idx=$(( (spin_idx + 1) % 4 ))
         local spin_char=""
         case $spin_idx in 0) spin_char="|";; 1) spin_char="/";; 2) spin_char="-";; 3) spin_char="\\";; esac
-        
+
         prog_val=$(( (prog_val + 5) % 100 ))
-        
+
         build_theme
         UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Connecting... [$spin_char]\nPROGRESS:$prog_val\nFOOTER:B/ Cancel\n"
         render_ui
         sleep 0.1
     done
-    
+
     kill -9 $key_pid 2>/dev/null
-    
-    if [ -s "$CACHE_DIR/tmp_files.txt" ]; then
-        local cache_file="$CACHE_DIR/${DL_ARCHIVE_ID}.list"
-        awk '{
-            filename = $0;
-            title = filename;
-            sub(/^.*\//, "", title);
-            sub(/\.[^.]+$/, "", title);
-            gsub(/%20/, " ", title);
-            gsub(/%26/, "\\&", title);
-            gsub(/%28/, "(", title);
-            gsub(/%29/, ")", title);
-            gsub(/%5B/, "[", title);
-            gsub(/%5D/, "]", title);
-            gsub(/%27/, "'\''", title);
-            print title "|" filename "|Unknown MB|0";
-        }' "$CACHE_DIR/tmp_files.txt" | sort -u > "$cache_file"
-        
-        rm -f "$CACHE_DIR/tmp_files.txt"
+
+    if [ -s "$cache_file" ]; then
         cp "$cache_file" "$CACHE_DIR/current_games.cache"
         rm -f "$CACHE_DIR/current_games_full.cache"
         STATE="DL_GAMES"
