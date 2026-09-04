@@ -773,11 +773,9 @@ state_settings() {
                     render_ui; sleep 1.5
                     ;;
                 6)
-                    rm -f "$CACHE_DIR/previews"/*.png
-                    rm -f "$CACHE_DIR/previews"/*.none
-                    build_theme
-                    UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Preview Cache Cleared!\n"
-                    render_ui; sleep 1.5
+                    PREVIEW_REPO_INDEX=0
+                    > "$CACHE_DIR/preview_scope_selected.txt"
+                    STATE="SELECT_PREVIEW_REPO"
                     ;;
                 7)
                     force_update_local_consoles
@@ -2575,50 +2573,102 @@ EOF
 }
 
 state_prefetch_covers_scan() {
-    build_theme
-    UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Scanning Repositories...\nART:NULL\n"
-    render_ui
+    local total_repos=$(awk -F'|' '$3!=""' "$ARCHIVES_FILE" | wc -l)
+    [ "$total_repos" -le 0 ] && total_repos=1
 
     mkdir -p "$CACHE_DIR/previews"
     > "$CACHE_DIR/prefetch_covers.txt"
 
-    while IFS='|' read -r sys_name sys_fld sys_id sys_ext; do
-        sys_id=$(echo "$sys_id" | tr -d '\r')
-        [ -z "$sys_id" ] && continue
+    rm -f /tmp/scan_active /tmp/scan_cancel
+    touch /tmp/scan_active
+    echo "0|Starting..." > "$CACHE_DIR/scan_progress.txt"
 
-        local libretro_sys=$(get_libretro_system "$sys_fld")
-        [ -z "$libretro_sys" ] && continue
+    # Runs the actual filesystem/network work in the background so the UI can keep
+    # redrawing (progress + cancel) instead of freezing for the whole scan. Per-repo
+    # queue lines are buffered in memory and flushed with a single append, instead of
+    # opening the output file once per game - on SD card storage, thousands of tiny
+    # writes (one per title) were the main reason this used to look like a hang.
+    (
+        local repo_num=0
+        while IFS='|' read -r sys_name sys_fld sys_id sys_ext; do
+            [ -f /tmp/scan_cancel ] && break
+            sys_id=$(echo "$sys_id" | tr -d '\r')
+            [ -z "$sys_id" ] && continue
+
+            local libretro_sys=$(get_libretro_system "$sys_fld")
+            [ -z "$libretro_sys" ] && continue
+
+            repo_num=$((repo_num + 1))
+            echo "${repo_num}|${sys_name}" > "$CACHE_DIR/scan_progress.txt"
+
+            local list_file="$CACHE_DIR/${sys_id}.list"
+            if [ ! -s "$list_file" ]; then
+                fetch_repo_list "$sys_id" "$sys_ext" "$list_file" "$sys_fld"
+            fi
+            [ -s "$list_file" ] || continue
+
+            local target_dir="/mnt/SDCARD/Roms/${sys_fld}"
+            local queue=""
+
+            while IFS='|' read -r title raw_name mb bytes; do
+                [ -z "$title" ] && continue
+                [ -s "$CACHE_DIR/previews/${title}.png" ] && continue
+                [ -f "$CACHE_DIR/previews/${title}.png.none" ] && continue
+
+                if [ -s "${target_dir}/Imgs/${title}.png" ]; then
+                    # Already downloaded and has its own cover on the SD card - reuse it
+                    # instead of fetching it again from the network.
+                    cp "${target_dir}/Imgs/${title}.png" "$CACHE_DIR/previews/${title}.png" 2>/dev/null
+                    continue
+                fi
+
+                queue="${queue}${title}|${libretro_sys}
+"
+            done < "$list_file"
+
+            [ -n "$queue" ] && printf '%s' "$queue" >> "$CACHE_DIR/prefetch_covers.txt"
+        done < "$ARCHIVES_FILE"
+
+        rm -f /tmp/scan_active
+    ) &
+    local worker_pid=$!
+
+    (
+        while [ -f /tmp/scan_active ]; do
+            k=$(./bin/getkey)
+            if [ "$k" = "B" ]; then
+                touch /tmp/scan_cancel
+                break
+            fi
+        done
+    ) &
+    local key_pid=$!
+
+    while [ -f /tmp/scan_active ]; do
+        local progress=$(cat "$CACHE_DIR/scan_progress.txt" 2>/dev/null)
+        local repo_num=$(echo "$progress" | cut -d'|' -f1)
+        local repo_name=$(echo "$progress" | cut -d'|' -f2 | cut -c 1-24)
+        [ -z "$repo_num" ] && repo_num=0
 
         build_theme
-        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Scanning: ${sys_name}\nART:NULL\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Scanning [$repo_num/$total_repos]: ${repo_name}\nART:NULL\nFOOTER:B/ Cancel\n"
         render_ui
+        sleep 0.2
+    done
 
-        local list_file="$CACHE_DIR/${sys_id}.list"
-        if [ ! -s "$list_file" ]; then
-            fetch_repo_list "$sys_id" "$sys_ext" "$list_file" "$sys_fld"
-        fi
-        [ -s "$list_file" ] || continue
+    kill -9 $key_pid 2>/dev/null
+    local was_cancelled=0
+    [ -f /tmp/scan_cancel ] && was_cancelled=1
+    rm -f /tmp/scan_active /tmp/scan_cancel
 
-        local target_dir="/mnt/SDCARD/Roms/${sys_fld}"
-
-        while IFS='|' read -r title raw_name mb bytes; do
-            [ -z "$title" ] && continue
-            [ -s "$CACHE_DIR/previews/${title}.png" ] && continue
-            [ -f "$CACHE_DIR/previews/${title}.png.none" ] && continue
-
-            if [ -s "${target_dir}/Imgs/${title}.png" ]; then
-                # Already downloaded and has its own cover on the SD card - reuse it
-                # instead of fetching it again from the network.
-                cp "${target_dir}/Imgs/${title}.png" "$CACHE_DIR/previews/${title}.png" 2>/dev/null
-                continue
-            fi
-
-            echo "${title}|${libretro_sys}" >> "$CACHE_DIR/prefetch_covers.txt"
-        done < "$list_file"
-
-    done < "$ARCHIVES_FILE"
-
-    if [ -s "$CACHE_DIR/prefetch_covers.txt" ]; then
+    if [ "$was_cancelled" -eq 1 ]; then
+        play_sound "back"
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Scan Cancelled!\n"
+        render_ui
+        sleep 1.5
+        STATE="MAIN_MENU"
+    elif [ -s "$CACHE_DIR/prefetch_covers.txt" ]; then
         sort -u "$CACHE_DIR/prefetch_covers.txt" -o "$CACHE_DIR/prefetch_covers.txt"
         STATE="CONFIRM_PREFETCH_COVERS"
     else
