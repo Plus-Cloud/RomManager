@@ -1141,6 +1141,8 @@ state_fetch_xml() {
 
 state_dl_games() {
     if [ ! -s "$CACHE_DIR/current_games.cache" ] && [ ! -f "$CACHE_DIR/current_games_full.cache" ]; then
+        [ -n "$DL_KEY_LISTENER_PID" ] && kill -9 "$DL_KEY_LISTENER_PID" 2>/dev/null
+        DL_KEY_LISTENER_PID=""
         STATE="DL_CONSOLES"
         UI_RENDER_NEEDED=1
         return
@@ -1188,10 +1190,16 @@ state_dl_games() {
         UI_FRAME_BUF="${UI_FRAME_BUF}FOOTER:A/ DL   Start/ Fav   Sel/ Search   B/ Back  [$human_pos/$total_items]\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}SCROLLBAR:$scroll_pct\n"
 
-        local items=$(awk -F'|' "NR>=$((start_item + 1)) && NR<=$((end_item + 1)) { 
+        local hl_line=$((DL_INDEX + 1))
+        local items=$(awk -F'|' -v hl_line="$hl_line" -v mq_pos="$MARQUEE_POS" "NR>=$((start_item + 1)) && NR<=$((end_item + 1)) {
             name = \$1;
-            sub(/\.[^.]+$/, \"\", name); 
-            print substr(name, 1, 28) 
+            sub(/\.[^.]+$/, \"\", name);
+            if (NR == hl_line && length(name) > 28) {
+                padded = name \"   \" name;
+                print substr(padded, mq_pos + 1, 28);
+            } else {
+                print substr(name, 1, 28);
+            }
         }" "$CACHE_DIR/current_games.cache")
         while read -r name; do
             [ -n "$name" ] && UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:${name}\n"
@@ -1212,12 +1220,46 @@ EOF
         render_ui
     fi
 
-    get_key || return
+    # ./bin/getkey blocks until a key event arrives, so calling it directly here (like every
+    # other screen does) would freeze the marquee animation while the player isn't touching
+    # anything - this screen would just sit waiting for the next press with no idle ticks in
+    # between. Run it in a background listener instead (the same trick FETCH_XML/DOWNLOAD use
+    # for their cancel-listeners) and poll for its result; while it's still waiting, this is
+    # an idle tick and the marquee gets to advance.
+    if [ -z "$DL_KEY_LISTENER_PID" ]; then
+        rm -f "$CACHE_DIR/.dl_key_result"
+        ( ./bin/getkey > "$CACHE_DIR/.dl_key_result" 2>/dev/null ) &
+        DL_KEY_LISTENER_PID=$!
+    fi
+
+    if kill -0 "$DL_KEY_LISTENER_PID" 2>/dev/null; then
+        KEY=""
+    else
+        KEY=$(cat "$CACHE_DIR/.dl_key_result" 2>/dev/null)
+        DL_KEY_LISTENER_PID=""
+    fi
+
+    if [ -z "$KEY" ]; then
+        sleep 0.08
+        local hl_title=$(sed -n "$((DL_INDEX + 1))p" "$CACHE_DIR/current_games.cache" | cut -d'|' -f1)
+        if [ ${#hl_title} -gt 28 ]; then
+            MARQUEE_TICK=$((MARQUEE_TICK + 1))
+            if [ "$MARQUEE_TICK" -ge 3 ]; then
+                MARQUEE_TICK=0
+                MARQUEE_POS=$(( (MARQUEE_POS + 1) % (${#hl_title} + 3) ))
+                UI_RENDER_NEEDED=1
+            fi
+        fi
+        return
+    fi
+    sleep 0.02
 
     case "$KEY" in
         down|up|right|left)
             play_sound "change"
             DL_INDEX=$(update_selection "$KEY" "$total_items" "$UI_MAX_ITEMS" "$DL_INDEX")
+            MARQUEE_POS=0
+            MARQUEE_TICK=0
             UI_RENDER_NEEDED=1
             ;;
         select)
