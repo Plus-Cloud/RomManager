@@ -1943,6 +1943,10 @@ EOF
                 *) new_ext="zip" ;;
             esac
             sed -i "${line_num}c\\${sys_name}|${sys_fld}|${sys_id}|${new_ext}" "$ARCHIVES_FILE"
+            # The cached listing was scraped with the old format filter - invalidate it so
+            # the next visit re-fetches with the new one instead of silently reusing stale
+            # results (this is exactly what made a manually-added extension look ignored).
+            [ -n "$sys_id" ] && rm -f "$CACHE_DIR/${sys_id}.list"
             UI_RENDER_NEEDED=1
             ;;
         select)
@@ -2041,6 +2045,7 @@ EOF
             play_sound "change"
             local new_folder=$(sed -n "$((FOLDER_SELECT_INDEX + 1))p" "$CACHE_DIR/roms_folders.list")
             sed -i "${REPO_EDIT_LINE_NUM}c\\${REPO_NEW_SYS_NAME}|${new_folder}|${REPO_NEW_SYS_ID}|${REPO_NEW_SYS_EXT}" "$ARCHIVES_FILE"
+            [ -n "$REPO_NEW_SYS_ID" ] && rm -f "$CACHE_DIR/${REPO_NEW_SYS_ID}.list"
             STATE="MANAGE_REPOS"
             UI_RENDER_NEEDED=1
             ;;
