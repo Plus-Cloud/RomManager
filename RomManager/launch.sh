@@ -1891,8 +1891,44 @@ state_validate_repo() {
         sed -i "${REPO_EDIT_LINE_NUM}c\\${REPO_NEW_SYS_NAME}|${REPO_NEW_SYS_FLD}||${REPO_NEW_SYS_EXT}" "$ARCHIVES_FILE"
         STATE="MANAGE_REPOS"
     else
-        if curl -s -L -k -m 10 "https://archive.org/metadata/${OSK_BUF}" | grep -q '"files"'; then
-            sed -i "${REPO_EDIT_LINE_NUM}c\\${REPO_NEW_SYS_NAME}|${REPO_NEW_SYS_FLD}|${OSK_BUF}|${REPO_NEW_SYS_EXT}" "$ARCHIVES_FILE"
+        local resolved_id="$OSK_BUF"
+        local meta_json=$(curl -s -L -k -m 10 "https://archive.org/metadata/${resolved_id}")
+
+        if ! echo "$meta_json" | grep -q '"files"'; then
+            build_theme
+            UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Trying case-insensitive match...\nPROGRESS:75\n"
+            render_ui
+
+            local search_json=$(curl -s -L -k -m 10 -G \
+                --data-urlencode "q=identifier:${OSK_BUF}" \
+                --data-urlencode "fl[]=identifier" \
+                --data-urlencode "rows=1" \
+                --data-urlencode "output=json" \
+                "https://archive.org/advancedsearch.php")
+            resolved_id=$(echo "$search_json" | grep -o '"identifier":"[^"]*"' | head -n1 | cut -d'"' -f4)
+
+            if [ -n "$resolved_id" ]; then
+                meta_json=$(curl -s -L -k -m 10 "https://archive.org/metadata/${resolved_id}")
+            fi
+        fi
+
+        if [ -n "$resolved_id" ] && echo "$meta_json" | grep -q '"files"'; then
+            if echo "$meta_json" | grep -q '"access-restricted-item":"true"'; then
+                # Some archive.org items require a logged-in/borrowed session to download
+                # their files (their file listing shows filenames but no download links,
+                # and direct downloads return 401). RomManager has no login support, so
+                # these repos can never actually download - reject them here instead of
+                # letting the user hit a confusing "Connection Failed" later.
+                play_sound "back"
+                build_theme
+                UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Repo is Restricted (needs archive.org login)!\n"
+                render_ui
+                sleep 2.5
+                STATE="OSK_INPUT"
+                UI_RENDER_NEEDED=1
+                return
+            fi
+            sed -i "${REPO_EDIT_LINE_NUM}c\\${REPO_NEW_SYS_NAME}|${REPO_NEW_SYS_FLD}|${resolved_id}|${REPO_NEW_SYS_EXT}" "$ARCHIVES_FILE"
             STATE="MANAGE_REPOS"
         else
             play_sound "back"
