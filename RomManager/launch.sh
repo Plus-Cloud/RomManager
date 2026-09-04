@@ -47,6 +47,7 @@ RECENT_INDEX=0
 MISSING_INDEX=0
 FAV_INDEX=0
 SET_INDEX=0
+FOLDER_SELECT_INDEX=0
 
 DL_CHOSEN_FOLDER=""
 DL_CHOSEN_DISPLAY=""
@@ -330,7 +331,8 @@ get_libretro_system() {
         "GBA") echo "Nintendo%20-%20Game%20Boy%20Advance" ;;
         "PS") echo "Sony%20-%20PlayStation" ;;
         "FC") echo "Nintendo%20-%20Nintendo%20Entertainment%20System" ;;
-        "SFC") echo "Nintendo%20-%20Super%20Nintendo%20Entertainment%20System" ;;
+        "SFC"|"SNES") echo "Nintendo%20-%20Super%20Nintendo%20Entertainment%20System" ;;
+        "SATELLAVIEW") echo "Nintendo%20-%20Satellaview" ;;
         "GB") echo "Nintendo%20-%20Game%20Boy" ;;
         "GBC") echo "Nintendo%20-%20Game%20Boy%20Color" ;;
         "MD") echo "Sega%20-%20Mega%20Drive%20-%20Genesis" ;;
@@ -339,7 +341,7 @@ get_libretro_system() {
         "PCE") echo "NEC%20-%20PC%20Engine%20-%20TurboGrafx%2016" ;;
         "NEOGEO") echo "SNK%20-%20Neo%20Geo" ;;
         "ARCADE") echo "MAME" ;;
-        *) echo "" ;; 
+        *) echo "" ;;
     esac
 }
 
@@ -349,6 +351,7 @@ get_console_name() {
         "PS") echo "PlayStation 1" ;;
         "FC") echo "Nintendo NES" ;;
         "SFC") echo "Super Nintendo" ;;
+        "SATELLAVIEW") echo "Satellaview" ;;
         "GB") echo "Game Boy" ;;
         "GBC") echo "Game Boy Color" ;;
         "MD") echo "Sega Genesis" ;;
@@ -1787,9 +1790,14 @@ state_manage_repos() {
         local scroll_pct=0
         [ "$total_items" -gt 1 ] && scroll_pct=$(( (REPO_INDEX * 100) / (total_items - 1) ))
 
+        local cur_entry=$(sed -n "$((REPO_INDEX + 1))p" "$ARCHIVES_FILE")
+        local cur_fld=$(echo "$cur_entry" | cut -d'|' -f2)
+        local cur_ext=$(echo "$cur_entry" | cut -d'|' -f4 | tr -d '\r')
+        [ -z "$cur_ext" ] && cur_ext="none"
+
         build_theme
-        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Manage Repositories\n"
-        UI_FRAME_BUF="${UI_FRAME_BUF}FOOTER:<-/-> Page  A/ Edit  Y/ Clear Cache  B/ Back\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Manage Repositories [Fld: $cur_fld | Fmt: $cur_ext]\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}FOOTER:A/ Edit  X/ Format  Sel/ Folder  Y/ Clear  B/ Back\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}SCROLLBAR:$scroll_pct\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ART:NULL\n"
 
@@ -1826,6 +1834,54 @@ EOF
             fi
             UI_RENDER_NEEDED=1
             ;;
+        X)
+            play_sound "change"
+            local line_num=$((REPO_INDEX + 1))
+            local entry=$(sed -n "${line_num}p" "$ARCHIVES_FILE")
+            local sys_name=$(echo "$entry" | cut -d'|' -f1)
+            local sys_fld=$(echo "$entry" | cut -d'|' -f2)
+            local sys_id=$(echo "$entry" | cut -d'|' -f3 | tr -d '\r')
+            local cur_ext=$(echo "$entry" | cut -d'|' -f4 | tr -d '\r')
+            local new_ext=""
+            case "$cur_ext" in
+                zip) new_ext="chd" ;;
+                chd) new_ext="bin" ;;
+                bin) new_ext="7z" ;;
+                7z) new_ext="rar" ;;
+                rar) new_ext="pce" ;;
+                pce) new_ext="gbc" ;;
+                gbc) new_ext="zip" ;;
+                *) new_ext="zip" ;;
+            esac
+            sed -i "${line_num}c\\${sys_name}|${sys_fld}|${sys_id}|${new_ext}" "$ARCHIVES_FILE"
+            UI_RENDER_NEEDED=1
+            ;;
+        select)
+            play_sound "change"
+            REPO_EDIT_LINE_NUM=$((REPO_INDEX + 1))
+            local entry=$(sed -n "${REPO_EDIT_LINE_NUM}p" "$ARCHIVES_FILE")
+            REPO_NEW_SYS_NAME=$(echo "$entry" | cut -d'|' -f1)
+            REPO_NEW_SYS_ID=$(echo "$entry" | cut -d'|' -f3 | tr -d '\r')
+            REPO_NEW_SYS_EXT=$(echo "$entry" | cut -d'|' -f4 | tr -d '\r')
+
+            > "$CACHE_DIR/roms_folders.list"
+            for dir in /mnt/SDCARD/Roms/*; do
+                [ -d "$dir" ] || continue
+                echo "${dir##*/}" >> "$CACHE_DIR/roms_folders.list"
+            done
+            sort -u "$CACHE_DIR/roms_folders.list" -o "$CACHE_DIR/roms_folders.list"
+
+            if [ ! -s "$CACHE_DIR/roms_folders.list" ]; then
+                build_theme
+                UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:No folders found in /Roms!\n"
+                render_ui
+                sleep 1.5
+            else
+                FOLDER_SELECT_INDEX=0
+                STATE="SELECT_REPO_FOLDER"
+            fi
+            UI_RENDER_NEEDED=1
+            ;;
         A)
             play_sound "change"
             REPO_EDIT_LINE_NUM=$((REPO_INDEX + 1))
@@ -1842,6 +1898,66 @@ EOF
         B)
             play_sound "back"
             STATE="MAIN_MENU"
+            UI_RENDER_NEEDED=1
+            ;;
+    esac
+}
+
+state_select_repo_folder() {
+    local total_items=$(wc -l < "$CACHE_DIR/roms_folders.list")
+    [ "$total_items" -le 0 ] && total_items=1
+
+    if [ "$UI_RENDER_NEEDED" -eq 1 ]; then
+        local start_item=$((FOLDER_SELECT_INDEX - 4))
+        [ "$start_item" -lt 0 ] && start_item=0
+        local end_item=$((start_item + UI_MAX_ITEMS - 1))
+        [ "$end_item" -ge "$total_items" ] && end_item=$((total_items - 1))
+        if [ $((end_item - start_item + 1)) -lt $UI_MAX_ITEMS ] && [ "$total_items" -ge $UI_MAX_ITEMS ]; then
+            start_item=$((end_item - UI_MAX_ITEMS + 1))
+            [ "$start_item" -lt 0 ] && start_item=0
+        fi
+
+        local human_pos=$((FOLDER_SELECT_INDEX + 1))
+        local scroll_pct=0
+        [ "$total_items" -gt 1 ] && scroll_pct=$(( (FOLDER_SELECT_INDEX * 100) / (total_items - 1) ))
+
+        local truncated_name=$(echo "$REPO_NEW_SYS_NAME" | cut -c 1-18)
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Target Folder for ${truncated_name}\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}FOOTER:<-/-> Page   A/ Set   B/ Cancel  [$human_pos/$total_items]\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}SCROLLBAR:$scroll_pct\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}ART:NULL\n"
+
+        local items=$(awk "NR>=$((start_item + 1)) && NR<=$((end_item + 1)) { print substr(\$0, 1, 28) }" "$CACHE_DIR/roms_folders.list")
+        while read -r name; do
+            [ -n "$name" ] && UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:${name}\n"
+        done <<EOF
+$items
+EOF
+
+        local rel=$((FOLDER_SELECT_INDEX - start_item))
+        UI_FRAME_BUF="${UI_FRAME_BUF}HIGHLIGHT:$rel\n"
+        render_ui
+    fi
+
+    get_key || return
+
+    case "$KEY" in
+        down|up|right|left)
+            play_sound "change"
+            FOLDER_SELECT_INDEX=$(update_selection "$KEY" "$total_items" "$UI_MAX_ITEMS" "$FOLDER_SELECT_INDEX")
+            UI_RENDER_NEEDED=1
+            ;;
+        A)
+            play_sound "change"
+            local new_folder=$(sed -n "$((FOLDER_SELECT_INDEX + 1))p" "$CACHE_DIR/roms_folders.list")
+            sed -i "${REPO_EDIT_LINE_NUM}c\\${REPO_NEW_SYS_NAME}|${new_folder}|${REPO_NEW_SYS_ID}|${REPO_NEW_SYS_EXT}" "$ARCHIVES_FILE"
+            STATE="MANAGE_REPOS"
+            UI_RENDER_NEEDED=1
+            ;;
+        B)
+            play_sound "back"
+            STATE="MANAGE_REPOS"
             UI_RENDER_NEEDED=1
             ;;
     esac
@@ -2182,6 +2298,7 @@ do
         SEARCH_GAMES) state_search_games ;;
         RECENT_DOWNLOADS) state_recent_downloads ;;
         MANAGE_REPOS) state_manage_repos ;;
+        SELECT_REPO_FOLDER) state_select_repo_folder ;;
         OSK_INPUT) state_osk_input ;;
         VALIDATE_REPO) state_validate_repo ;;
         SCRAPE_ART) state_scrape_art ;;
