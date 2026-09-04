@@ -345,6 +345,56 @@ get_libretro_system() {
     esac
 }
 
+# Extra file extensions to automatically accept for a given system folder, on top of the
+# universal defaults (zip|7z|rar|chd) and whatever the user manually set via "Format" in
+# Manage Repositories. This lets a single repo entry pick up e.g. both .zip and .smc SNES
+# dumps, or PS1 .bin (its .cue pair is fetched automatically at download time), without the
+# user having to know or configure it per repo.
+get_auto_extensions() {
+    case "$1" in
+        FC|NES) echo "nes" ;;
+        SFC|SNES) echo "smc|sfc" ;;
+        SATELLAVIEW) echo "bs" ;;
+        GB|SGB) echo "gb" ;;
+        GBC) echo "gbc" ;;
+        GBA) echo "gba" ;;
+        MD) echo "md|gen" ;;
+        GG) echo "gg" ;;
+        SMS) echo "sms" ;;
+        PCE) echo "pce" ;;
+        PS) echo "bin" ;;
+        NGP) echo "ngp" ;;
+        NGPC) echo "ngc" ;;
+        WS) echo "ws" ;;
+        WSC) echo "wsc" ;;
+        ATARI2600) echo "a26" ;;
+        ATARI7800) echo "a78" ;;
+        ATARILYNX) echo "lnx" ;;
+        VB) echo "vb" ;;
+        # CD-based systems: .bin also carries a matching .cue, fetched automatically
+        # at download time (same mechanism as PS1).
+        SEGACD|NEOCD|PCFX) echo "bin" ;;
+        FDS) echo "fds" ;;
+        POKEFAMI) echo "min" ;;
+        NDS) echo "nds" ;;
+        N64) echo "n64|z64|v64" ;;
+        MSX|MSX2) echo "rom|dsk|cas" ;;
+        PICO) echo "p8" ;;
+        FIFTYTWO00) echo "a52" ;;
+        AMIGA) echo "adf|lha" ;;
+        C64) echo "d64|t64|crt" ;;
+        PSP) echo "iso|cso" ;;
+        DC) echo "cdi" ;;
+        32X) echo "32x" ;;
+        TIC80) echo "tic" ;;
+        VECTREX) echo "vec" ;;
+        # ARCADE, CPS1/2/3, NEOGEO, DOS, PORTS, GW, SCUMMVM: no single-file raw dump
+        # format in common use - these are always distributed as zip/7z archives,
+        # already covered by the universal defaults.
+        *) echo "" ;;
+    esac
+}
+
 get_console_name() {
     case "$1" in
         "GBA") echo "Game Boy Advance" ;;
@@ -433,7 +483,7 @@ fetch_libretro_art() {
     
     # Try the exact GoodTools-translated name first
     if try_curl "${base_url}/$(url_enc "$clean_name").png" "$tmp_out"; then success=1; fi
-    
+
     # Then start hammering the naked title with standard No-Intro suffixes
     if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28USA%2C%20Europe%29.png" "$tmp_out"; then success=1; fi
     if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28USA%29.png" "$tmp_out"; then success=1; fi
