@@ -823,11 +823,16 @@ state_select_preview_repo() {
         UI_FRAME_BUF="${UI_FRAME_BUF}SCROLLBAR:$scroll_pct\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ART:NULL\n"
 
+        local total_real=$((total_items - 1))
         if [ -s "$CACHE_DIR/preview_scope_selected.txt" ]; then
-            local items=$(awk -F'|' -v start=$((start_item + 1)) -v end=$((end_item + 1)) '
+            local items=$(awk -F'|' -v start=$((start_item + 1)) -v end=$((end_item + 1)) -v sel_count="$selected_count" -v total_real="$total_real" '
                 NR==FNR { sel[$0]=1; next }
                 (FNR>=start && FNR<=end) {
-                    mark = ($2 in sel) ? "*" : "-";
+                    if ($2 == "__ALL__") {
+                        mark = (sel_count > 0 && sel_count == total_real) ? "*" : "-";
+                    } else {
+                        mark = ($2 in sel) ? "*" : "-";
+                    }
                     print mark substr($1, 1, 27);
                 }
             ' "$CACHE_DIR/preview_scope_selected.txt" "$CACHE_DIR/preview_scope_list.txt")
@@ -858,7 +863,14 @@ EOF
         A)
             play_sound "change"
             local chosen_id=$(sed -n "$((PREVIEW_REPO_INDEX + 1))p" "$CACHE_DIR/preview_scope_list.txt" | cut -d'|' -f2)
-            if grep -qxF "$chosen_id" "$CACHE_DIR/preview_scope_selected.txt" 2>/dev/null; then
+            if [ "$chosen_id" = "__ALL__" ]; then
+                local total_real=$(( $(wc -l < "$CACHE_DIR/preview_scope_list.txt") - 1 ))
+                if [ "$selected_count" -gt 0 ] && [ "$selected_count" -eq "$total_real" ]; then
+                    > "$CACHE_DIR/preview_scope_selected.txt"
+                else
+                    awk -F'|' '$2!="__ALL__"{print $2}' "$CACHE_DIR/preview_scope_list.txt" > "$CACHE_DIR/preview_scope_selected.txt"
+                fi
+            elif grep -qxF "$chosen_id" "$CACHE_DIR/preview_scope_selected.txt" 2>/dev/null; then
                 grep -vxF "$chosen_id" "$CACHE_DIR/preview_scope_selected.txt" > "$CACHE_DIR/preview_scope_selected.txt.tmp"
                 mv "$CACHE_DIR/preview_scope_selected.txt.tmp" "$CACHE_DIR/preview_scope_selected.txt"
             else
@@ -868,7 +880,7 @@ EOF
             ;;
         Y)
             play_sound "change"
-            cut -d'|' -f2 "$CACHE_DIR/preview_scope_list.txt" > "$CACHE_DIR/preview_scope_selected.txt"
+            awk -F'|' '$2!="__ALL__"{print $2}' "$CACHE_DIR/preview_scope_list.txt" > "$CACHE_DIR/preview_scope_selected.txt"
             UI_RENDER_NEEDED=1
             ;;
         X)
@@ -888,24 +900,20 @@ EOF
                 play_sound "change"
                 refresh_previews_have_list
 
-                if grep -qxF "__ALL__" "$CACHE_DIR/preview_scope_selected.txt"; then
-                    cp "$CACHE_DIR/preview_cache_have.txt" "$CACHE_DIR/preview_delete_targets.txt"
-                else
-                    > "$CACHE_DIR/preview_delete_targets.txt"
-                    while read -r repo_id; do
-                        [ -z "$repo_id" ] && continue
-                        local repo_list="$CACHE_DIR/${repo_id}.list"
-                        [ -s "$repo_list" ] || continue
-                        [ -s "$CACHE_DIR/preview_cache_have.txt" ] || continue
-                        # Intersect this repo's known titles with what's actually cached
-                        # as a preview - a single in-memory join, no per-title stat()s.
-                        awk -F'|' '
-                            NR==FNR { have[$0]=1; next }
-                            ($1 in have) { print $1 }
-                        ' "$CACHE_DIR/preview_cache_have.txt" "$repo_list" >> "$CACHE_DIR/preview_delete_targets.txt"
-                    done < "$CACHE_DIR/preview_scope_selected.txt"
-                    sort -u "$CACHE_DIR/preview_delete_targets.txt" -o "$CACHE_DIR/preview_delete_targets.txt"
-                fi
+                > "$CACHE_DIR/preview_delete_targets.txt"
+                while read -r repo_id; do
+                    [ -z "$repo_id" ] && continue
+                    local repo_list="$CACHE_DIR/${repo_id}.list"
+                    [ -s "$repo_list" ] || continue
+                    [ -s "$CACHE_DIR/preview_cache_have.txt" ] || continue
+                    # Intersect this repo's known titles with what's actually cached
+                    # as a preview - a single in-memory join, no per-title stat()s.
+                    awk -F'|' '
+                        NR==FNR { have[$0]=1; next }
+                        ($1 in have) { print $1 }
+                    ' "$CACHE_DIR/preview_cache_have.txt" "$repo_list" >> "$CACHE_DIR/preview_delete_targets.txt"
+                done < "$CACHE_DIR/preview_scope_selected.txt"
+                sort -u "$CACHE_DIR/preview_delete_targets.txt" -o "$CACHE_DIR/preview_delete_targets.txt"
 
                 if [ -s "$CACHE_DIR/preview_delete_targets.txt" ]; then
                     STATE="CONFIRM_DELETE_PREVIEWS"
@@ -2849,7 +2857,7 @@ while read -r fld; do
 done < "$CACHE_DIR/local_consoles.cache"
 
 build_theme
-UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:System Ready\nITEM:Installed ROMs: $total_roms\nITEM:Systems Found: $total_sys\nITEM:Cache Status: Healthy\nITEM:\nITEM:Made by pluscloud\nART:NULL\nHIGHLIGHT:-1\n"
+UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:System Ready\nITEM:Installed ROMs: $total_roms\nITEM:Systems Found: $total_sys\nITEM:Cache Status: Healthy\nITEM:\nITEM:Made by pluscloud (and updated by brenonsc :p)\nART:NULL\nHIGHLIGHT:-1\n"
 render_ui
 sleep 1.5
 
