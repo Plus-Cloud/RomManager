@@ -823,13 +823,19 @@ state_select_preview_repo() {
         UI_FRAME_BUF="${UI_FRAME_BUF}SCROLLBAR:$scroll_pct\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ART:NULL\n"
 
-        local items=$(awk -F'|' -v start=$((start_item + 1)) -v end=$((end_item + 1)) '
-            NR==FNR { sel[$0]=1; next }
-            (FNR>=start && FNR<=end) {
-                mark = ($2 in sel) ? "*" : "-";
-                print mark substr($1, 1, 27);
-            }
-        ' "$CACHE_DIR/preview_scope_selected.txt" "$CACHE_DIR/preview_scope_list.txt")
+        if [ -s "$CACHE_DIR/preview_scope_selected.txt" ]; then
+            local items=$(awk -F'|' -v start=$((start_item + 1)) -v end=$((end_item + 1)) '
+                NR==FNR { sel[$0]=1; next }
+                (FNR>=start && FNR<=end) {
+                    mark = ($2 in sel) ? "*" : "-";
+                    print mark substr($1, 1, 27);
+                }
+            ' "$CACHE_DIR/preview_scope_selected.txt" "$CACHE_DIR/preview_scope_list.txt")
+        else
+            local items=$(awk -F'|' -v start=$((start_item + 1)) -v end=$((end_item + 1)) '
+                NR>=start && NR<=end { print "-" substr($1, 1, 27) }
+            ' "$CACHE_DIR/preview_scope_list.txt")
+        fi
         while read -r name; do
             [ -n "$name" ] && UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:${name}\n"
         done <<EOF
@@ -890,6 +896,7 @@ EOF
                         [ -z "$repo_id" ] && continue
                         local repo_list="$CACHE_DIR/${repo_id}.list"
                         [ -s "$repo_list" ] || continue
+                        [ -s "$CACHE_DIR/preview_cache_have.txt" ] || continue
                         # Intersect this repo's known titles with what's actually cached
                         # as a preview - a single in-memory join, no per-title stat()s.
                         awk -F'|' '
