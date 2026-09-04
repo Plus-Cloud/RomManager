@@ -537,16 +537,28 @@ fetch_repo_list() {
     local ext="$2"
     local out_file="$3"
     local folder="$4"
+    local status_file="$5"
 
     local ext_regex="zip|7z|rar|chd"
     local auto_ext=$(get_auto_extensions "$folder")
     [ -n "$auto_ext" ] && ext_regex="${auto_ext}|${ext_regex}"
     [ -n "$ext" ] && ext_regex="${ext}|${ext_regex}"
 
+    # Large repos (thousands of files) can have a multi-megabyte listing page - give it
+    # a generous ceiling instead of the tighter timeout used for small API calls, so a
+    # slow connection doesn't get cut off mid-download and reported as "empty".
+    local tmp_page="$CACHE_DIR/.tmp_repo_page_$$"
+    curl -s -L -k --retry 2 --retry-delay 1 --connect-timeout 15 -m 90 "https://archive.org/download/${archive_id}/" -o "$tmp_page"
+
+    if [ ! -s "$tmp_page" ]; then
+        rm -f "$tmp_page"
+        [ -n "$status_file" ] && echo "no_connection" > "$status_file"
+        return 1
+    fi
+
     local tmp_list="$CACHE_DIR/.tmp_repo_list_$$"
-    curl -s -L -k --retry 2 --connect-timeout 8 -m 30 "https://archive.org/download/${archive_id}/" \
-        | grep -iEo 'href="[^"]*\.('"$ext_regex"')[^"]*"' \
-        | cut -d'"' -f2 > "$tmp_list"
+    grep -iEo 'href="[^"]*\.('"$ext_regex"')[^"]*"' "$tmp_page" | cut -d'"' -f2 > "$tmp_list"
+    rm -f "$tmp_page"
 
     if [ -s "$tmp_list" ]; then
         awk '
@@ -861,11 +873,12 @@ state_fetch_xml() {
     render_ui
 
     local cache_file="$CACHE_DIR/${DL_ARCHIVE_ID}.list"
+    local status_file="$CACHE_DIR/.fetch_status"
 
-    rm -f /tmp/xml_active /tmp/xml_cancel
+    rm -f /tmp/xml_active /tmp/xml_cancel "$status_file"
 
     (
-        fetch_repo_list "$DL_ARCHIVE_ID" "$DL_EXT" "$cache_file" "$DL_CHOSEN_FOLDER"
+        fetch_repo_list "$DL_ARCHIVE_ID" "$DL_EXT" "$cache_file" "$DL_CHOSEN_FOLDER" "$status_file"
         rm -f /tmp/xml_active
     ) &
     local curl_pid=$!
@@ -914,10 +927,17 @@ state_fetch_xml() {
         rm -f "$CACHE_DIR/current_games_full.cache"
         STATE="DL_GAMES"
         DL_INDEX=0
+        MARQUEE_POS=0
+        MARQUEE_TICK=0
     else
+        local reason=$(cat "$status_file" 2>/dev/null)
         play_sound "back"
         build_theme
-        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Connection Failed/Empty!\n"
+        if [ "$reason" = "no_connection" ]; then
+            UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Connection Failed! Check your network.\n"
+        else
+            UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:No Matching Files Found in Repo!\n"
+        fi
         render_ui
         sleep 2
         STATE="DL_CONSOLES"
