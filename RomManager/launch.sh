@@ -1103,7 +1103,32 @@ state_confirm_download() {
                     mv "$target_dir/.tmp_$safe_file_name" "$target_dir/$safe_file_name"
                     invalidate_game_cache
                     force_update_local_consoles
-                    
+
+                    # Bin/Cue disc images: the .cue sheet is a separate file on the archive
+                    # sharing the same base name as the .bin - fetch it alongside automatically.
+                    # Detected from the actual downloaded file's extension (not a per-repo
+                    # setting), so it works whether .bin showed up via the automatic PS1
+                    # extension or a manually configured repo format.
+                    local cue_raw_name=$(echo "$raw_file_name" | sed 's/\.[Bb][Ii][Nn]$/.cue/')
+                    if [ "$cue_raw_name" != "$raw_file_name" ]; then
+                        local safe_cue_name="${cue_raw_name##*/}"
+                        safe_cue_name=$(url_decode "$safe_cue_name")
+                        local cue_url="https://archive.org/download/${DL_ARCHIVE_ID}/${cue_raw_name}"
+
+                        build_theme
+                        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Downloading matching .cue...\nPROGRESS:95\nART:$preview_path\n"
+                        render_ui
+
+                        curl --fail --retry 3 --retry-delay 1 -f -s -L -k --connect-timeout 10 -A "Mozilla/5.0" "$cue_url" -o "$target_dir/$safe_cue_name" < /dev/null
+                        if [ ! -s "$target_dir/$safe_cue_name" ]; then
+                            rm -f "$target_dir/$safe_cue_name"
+                            build_theme
+                            UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Warning: .cue file not found on repo!\nART:$preview_path\n"
+                            render_ui
+                            sleep 1.5
+                        fi
+                    fi
+
                     if [ "$preview_path" != "BLANK" ]; then
                         mkdir -p "$target_dir/Imgs"
                         cp "$preview_path" "$target_dir/Imgs/${base_name}.png"
