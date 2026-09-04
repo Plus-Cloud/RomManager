@@ -48,6 +48,11 @@ MISSING_INDEX=0
 FAV_INDEX=0
 SET_INDEX=0
 FOLDER_SELECT_INDEX=0
+PREVIEW_REPO_INDEX=0
+
+MARQUEE_POS=0
+MARQUEE_TICK=0
+DL_KEY_LISTENER_PID=""
 
 DL_CHOSEN_FOLDER=""
 DL_CHOSEN_DISPLAY=""
@@ -597,7 +602,24 @@ fetch_repo_list() {
         ' "$tmp_list" | sort -u > "$out_file"
     fi
     rm -f "$tmp_list"
-    [ -s "$out_file" ]
+
+    if [ ! -s "$out_file" ]; then
+        [ -n "$status_file" ] && echo "no_matches" > "$status_file"
+        return 1
+    fi
+    return 0
+}
+
+refresh_previews_have_list() {
+    local previews_mtime=$(stat -c %Y "$CACHE_DIR/previews" 2>/dev/null || echo 0)
+    local last_scanned_mtime=$(cat "$CACHE_DIR/preview_cache_mtime.txt" 2>/dev/null)
+    if [ "$previews_mtime" != "$last_scanned_mtime" ] || [ ! -f "$CACHE_DIR/preview_cache_have.txt" ]; then
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Scanning Preview Cache...\nART:NULL\n"
+        render_ui
+        ls "$CACHE_DIR/previews" 2>/dev/null | grep '\.png$' | sed 's/\.png$//' | sort > "$CACHE_DIR/preview_cache_have.txt"
+        echo "$previews_mtime" > "$CACHE_DIR/preview_cache_mtime.txt"
+    fi
 }
 
 update_local_consoles() {
@@ -713,7 +735,7 @@ state_settings() {
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Auto Scrape Cover [$scrape_txt]\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Repo Cache (Days) [$REPO_CACHE_DAYS]\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:-> Clear Repo Cache\n"
-        UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:-> Clear Preview Cache\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:-> Manage Preview Cache\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:-> Rebuild Local Database\n"
         
         UI_FRAME_BUF="${UI_FRAME_BUF}HIGHLIGHT:$SET_INDEX\n"
@@ -773,6 +795,178 @@ state_settings() {
             UI_RENDER_NEEDED=1
             ;;
     esac
+}
+
+state_select_preview_repo() {
+    awk -F'|' 'BEGIN{print "[ALL REPOSITORIES]|__ALL__"} $3!=""{print $1"|"$3}' "$ARCHIVES_FILE" > "$CACHE_DIR/preview_scope_list.txt"
+
+    local total_items=$(wc -l < "$CACHE_DIR/preview_scope_list.txt")
+    [ "$total_items" -le 0 ] && total_items=1
+    local selected_count=$(wc -l < "$CACHE_DIR/preview_scope_selected.txt" 2>/dev/null)
+    [ -z "$selected_count" ] && selected_count=0
+
+    if [ "$UI_RENDER_NEEDED" -eq 1 ]; then
+        local start_item=$((PREVIEW_REPO_INDEX - 4))
+        [ "$start_item" -lt 0 ] && start_item=0
+        local end_item=$((start_item + UI_MAX_ITEMS - 1))
+        [ "$end_item" -ge "$total_items" ] && end_item=$((total_items - 1))
+        if [ $((end_item - start_item + 1)) -lt $UI_MAX_ITEMS ] && [ "$total_items" -ge $UI_MAX_ITEMS ]; then
+            start_item=$((end_item - UI_MAX_ITEMS + 1))
+            [ "$start_item" -lt 0 ] && start_item=0
+        fi
+
+        local human_pos=$((PREVIEW_REPO_INDEX + 1))
+        local scroll_pct=0
+        [ "$total_items" -gt 1 ] && scroll_pct=$(( (PREVIEW_REPO_INDEX * 100) / (total_items - 1) ))
+
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Manage Preview Cache ($selected_count selected)\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}FOOTER:A/ Toggle  Y/ All  X/ None  Start/ Delete  B/ Back  [$human_pos/$total_items]\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}SCROLLBAR:$scroll_pct\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}ART:NULL\n"
+
+        local items=$(awk -F'|' -v start=$((start_item + 1)) -v end=$((end_item + 1)) '
+            NR==FNR { sel[$0]=1; next }
+            (FNR>=start && FNR<=end) {
+                mark = ($2 in sel) ? "*" : "-";
+                print mark substr($1, 1, 27);
+            }
+        ' "$CACHE_DIR/preview_scope_selected.txt" "$CACHE_DIR/preview_scope_list.txt")
+        while read -r name; do
+            [ -n "$name" ] && UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:${name}\n"
+        done <<EOF
+$items
+EOF
+
+        local rel=$((PREVIEW_REPO_INDEX - start_item))
+        UI_FRAME_BUF="${UI_FRAME_BUF}HIGHLIGHT:$rel\n"
+        render_ui
+    fi
+
+    get_key || return
+
+    case "$KEY" in
+        down|up|right|left)
+            play_sound "change"
+            PREVIEW_REPO_INDEX=$(update_selection "$KEY" "$total_items" "$UI_MAX_ITEMS" "$PREVIEW_REPO_INDEX")
+            UI_RENDER_NEEDED=1
+            ;;
+        A)
+            play_sound "change"
+            local chosen_id=$(sed -n "$((PREVIEW_REPO_INDEX + 1))p" "$CACHE_DIR/preview_scope_list.txt" | cut -d'|' -f2)
+            if grep -qxF "$chosen_id" "$CACHE_DIR/preview_scope_selected.txt" 2>/dev/null; then
+                grep -vxF "$chosen_id" "$CACHE_DIR/preview_scope_selected.txt" > "$CACHE_DIR/preview_scope_selected.txt.tmp"
+                mv "$CACHE_DIR/preview_scope_selected.txt.tmp" "$CACHE_DIR/preview_scope_selected.txt"
+            else
+                echo "$chosen_id" >> "$CACHE_DIR/preview_scope_selected.txt"
+            fi
+            UI_RENDER_NEEDED=1
+            ;;
+        Y)
+            play_sound "change"
+            cut -d'|' -f2 "$CACHE_DIR/preview_scope_list.txt" > "$CACHE_DIR/preview_scope_selected.txt"
+            UI_RENDER_NEEDED=1
+            ;;
+        X)
+            play_sound "change"
+            > "$CACHE_DIR/preview_scope_selected.txt"
+            UI_RENDER_NEEDED=1
+            ;;
+        start)
+            if [ "$selected_count" -eq 0 ]; then
+                play_sound "back"
+                build_theme
+                UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Nothing Selected!\n"
+                render_ui
+                sleep 1
+                UI_RENDER_NEEDED=1
+            else
+                play_sound "change"
+                refresh_previews_have_list
+
+                if grep -qxF "__ALL__" "$CACHE_DIR/preview_scope_selected.txt"; then
+                    cp "$CACHE_DIR/preview_cache_have.txt" "$CACHE_DIR/preview_delete_targets.txt"
+                else
+                    > "$CACHE_DIR/preview_delete_targets.txt"
+                    while read -r repo_id; do
+                        [ -z "$repo_id" ] && continue
+                        local repo_list="$CACHE_DIR/${repo_id}.list"
+                        [ -s "$repo_list" ] || continue
+                        # Intersect this repo's known titles with what's actually cached
+                        # as a preview - a single in-memory join, no per-title stat()s.
+                        awk -F'|' '
+                            NR==FNR { have[$0]=1; next }
+                            ($1 in have) { print $1 }
+                        ' "$CACHE_DIR/preview_cache_have.txt" "$repo_list" >> "$CACHE_DIR/preview_delete_targets.txt"
+                    done < "$CACHE_DIR/preview_scope_selected.txt"
+                    sort -u "$CACHE_DIR/preview_delete_targets.txt" -o "$CACHE_DIR/preview_delete_targets.txt"
+                fi
+
+                if [ -s "$CACHE_DIR/preview_delete_targets.txt" ]; then
+                    STATE="CONFIRM_DELETE_PREVIEWS"
+                else
+                    build_theme
+                    UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:No Cached Previews for Selection!\n"
+                    render_ui
+                    sleep 1.5
+                fi
+                UI_RENDER_NEEDED=1
+            fi
+            ;;
+        B)
+            play_sound "back"
+            > "$CACHE_DIR/preview_scope_selected.txt"
+            STATE="SETTINGS"
+            UI_RENDER_NEEDED=1
+            ;;
+    esac
+}
+
+state_confirm_delete_previews() {
+    local target_count=$(wc -l < "$CACHE_DIR/preview_delete_targets.txt" 2>/dev/null)
+    [ -z "$target_count" ] && target_count=0
+
+    build_theme
+    UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Delete $target_count cached preview(s)?\nHIGHLIGHT:0\nFOOTER:A/ Yes, Delete   B/ Cancel\nART:NULL\n"
+    render_ui
+
+    while true; do
+        get_key || continue
+
+        case "$KEY" in
+            A)
+                play_sound "change"
+                while read -r name; do
+                    [ -z "$name" ] && continue
+                    rm -f "$CACHE_DIR/previews/${name}.png" "$CACHE_DIR/previews/${name}.png.none"
+                done < "$CACHE_DIR/preview_delete_targets.txt"
+
+                if [ -f "$CACHE_DIR/preview_cache_have.txt" ]; then
+                    grep -vxFf "$CACHE_DIR/preview_delete_targets.txt" "$CACHE_DIR/preview_cache_have.txt" > "$CACHE_DIR/preview_cache_have.txt.tmp"
+                    mv "$CACHE_DIR/preview_cache_have.txt.tmp" "$CACHE_DIR/preview_cache_have.txt"
+                fi
+                > "$CACHE_DIR/preview_scope_selected.txt"
+
+                stat -c %Y "$CACHE_DIR/previews" 2>/dev/null > "$CACHE_DIR/preview_cache_mtime.txt"
+
+                play_sound "confirm"
+                build_theme
+                UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:$target_count Preview(s) Deleted!\n"
+                render_ui
+                sleep 1.5
+
+                STATE="SELECT_PREVIEW_REPO"
+                UI_RENDER_NEEDED=1
+                return
+                ;;
+            B)
+                play_sound "back"
+                STATE="SELECT_PREVIEW_REPO"
+                UI_RENDER_NEEDED=1
+                return
+                ;;
+        esac
+    done
 }
 
 state_dl_consoles() {
@@ -2577,6 +2771,8 @@ do
         INST_GAMES) state_inst_games ;;
         FAVORITES) state_favorites ;;
         SETTINGS) state_settings ;;
+        SELECT_PREVIEW_REPO) state_select_preview_repo ;;
+        CONFIRM_DELETE_PREVIEWS) state_confirm_delete_previews ;;
         CONFIRM_SINGLE_SCRAPE) state_confirm_single_scrape ;;
         CONFIRM_DELETE) state_confirm_delete ;;
         SEARCH_GAMES) state_search_games ;;
