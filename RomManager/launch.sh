@@ -454,6 +454,7 @@ fetch_libretro_art() {
     local sys="$1"
     local base="$2"
     local out="$3"
+    local fast="$4"
     local tmp_out="${out}.tmp"
     rm -f "$tmp_out"
 
@@ -476,21 +477,34 @@ fetch_libretro_art() {
     # ---------------------------------------
 
     local base_url="https://thumbnails.libretro.com/${sys}/Named_Boxarts"
-    
-    try_curl() { curl --retry 2 --retry-delay 1 -f -s -L -k --globoff --connect-timeout 5 -m 15 -A "Mozilla/5.0" "$1" -o "$2"; }
+
+    local curl_timeout=15
+    local curl_connect=5
+    local curl_retry=2
+    if [ "$fast" = "1" ]; then
+        curl_timeout=4
+        curl_connect=2
+        curl_retry=0
+    fi
+
+    try_curl() { curl --retry $curl_retry --retry-delay 1 -f -s -L -k --globoff --connect-timeout $curl_connect -m $curl_timeout -A "Mozilla/5.0" "$1" -o "$2"; }
 
     local success=0
-    
+
     # Try the exact GoodTools-translated name first
     if try_curl "${base_url}/$(url_enc "$clean_name").png" "$tmp_out"; then success=1; fi
 
     # Then start hammering the naked title with standard No-Intro suffixes
     if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28USA%2C%20Europe%29.png" "$tmp_out"; then success=1; fi
-    if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28USA%29.png" "$tmp_out"; then success=1; fi
-    if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28Europe%29.png" "$tmp_out"; then success=1; fi
-    if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28World%29.png" "$tmp_out"; then success=1; fi
-    if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28Japan%29.png" "$tmp_out"; then success=1; fi
-    if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name").png" "$tmp_out"; then success=1; fi
+
+    # In fast (browse-preview) mode, stop after the two most common variants to keep navigation snappy
+    if [ "$fast" != "1" ]; then
+        if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28USA%29.png" "$tmp_out"; then success=1; fi
+        if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28Europe%29.png" "$tmp_out"; then success=1; fi
+        if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28World%29.png" "$tmp_out"; then success=1; fi
+        if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28Japan%29.png" "$tmp_out"; then success=1; fi
+        if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name").png" "$tmp_out"; then success=1; fi
+    fi
 
     if [ $success -eq 1 ] && [ -s "$tmp_out" ]; then
         mv "$tmp_out" "$out"
@@ -621,7 +635,7 @@ EOF
 # ==========================================
 
 state_main_menu() {
-    local total_items=7
+    local total_items=8
 
     if [ "$UI_RENDER_NEEDED" -eq 1 ]; then
         build_theme
@@ -630,6 +644,7 @@ state_main_menu() {
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Installed ROMs Directory\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Favorite Games\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Scrape Missing Box Art\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Prefetch Repo Previews\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Manage Repositories\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Recent Downloads\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Settings & Tools\n"
@@ -654,9 +669,10 @@ state_main_menu() {
                 1) update_local_consoles; STATE="INST_CONSOLES" ;;
                 2) STATE="FAVORITES" ;;
                 3) STATE="SCRAPE_ART" ;;
-                4) STATE="MANAGE_REPOS" ;;
-                5) STATE="RECENT_DOWNLOADS" ;;
-                6) STATE="SETTINGS" ;;
+                4) STATE="PREFETCH_COVERS_SCAN" ;;
+                5) STATE="MANAGE_REPOS" ;;
+                6) STATE="RECENT_DOWNLOADS" ;;
+                7) STATE="SETTINGS" ;;
             esac
             UI_RENDER_NEEDED=1
             ;;
@@ -724,6 +740,7 @@ state_settings() {
                     ;;
                 6)
                     rm -f "$CACHE_DIR/previews"/*.png
+                    rm -f "$CACHE_DIR/previews"/*.none
                     build_theme
                     UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Preview Cache Cleared!\n"
                     render_ui; sleep 1.5
@@ -937,7 +954,7 @@ state_dl_games() {
         
         local raw_file_name=$(echo "$game_line" | cut -d'|' -f2)
         local safe_file_name="${raw_file_name##*/}"
-        safe_file_name=$(echo "$safe_file_name" | sed 's/%20/ /g; s/%26/\&/g; s/%28/(/g; s/%29/)/g; s/%5B/[/g; s/%5D/]/g; s/%27/'\''/g')
+        safe_file_name=$(url_decode "$safe_file_name")
         
         local base_name="${safe_file_name%.*}"
         local target_dir="/mnt/SDCARD/Roms/$DL_CHOSEN_FOLDER"
@@ -970,6 +987,8 @@ EOF
 
         if [ "$is_installed" -eq 1 ] && [ -s "$target_dir/Imgs/${base_name}.png" ]; then
             UI_FRAME_BUF="${UI_FRAME_BUF}ART:$target_dir/Imgs/${base_name}.png\n"
+        elif [ -s "$CACHE_DIR/previews/${base_name}.png" ]; then
+            UI_FRAME_BUF="${UI_FRAME_BUF}ART:$CACHE_DIR/previews/${base_name}.png\n"
         else
             UI_FRAME_BUF="${UI_FRAME_BUF}ART:BLANK\n"
         fi
@@ -1001,7 +1020,7 @@ EOF
             local title=$(echo "$game_line" | cut -d'|' -f1)
             local raw_file_name=$(echo "$game_line" | cut -d'|' -f2)
             local safe_file_name="${raw_file_name##*/}"
-            safe_file_name=$(echo "$safe_file_name" | sed 's/%20/ /g; s/%26/\&/g; s/%28/(/g; s/%29/)/g; s/%5B/[/g; s/%5D/]/g; s/%27/'\''/g')
+            safe_file_name=$(url_decode "$safe_file_name")
             toggle_favorite "${DL_CHOSEN_FOLDER}|${safe_file_name}|${title}"
             UI_RENDER_NEEDED=1
             ;;
@@ -1026,7 +1045,7 @@ EOF
             local game_line=$(sed -n "$((DL_INDEX + 1))p" "$CACHE_DIR/current_games.cache")
             local raw_file_name=$(echo "$game_line" | cut -d'|' -f2)
             local safe_file_name="${raw_file_name##*/}"
-            safe_file_name=$(echo "$safe_file_name" | sed 's/%20/ /g; s/%26/\&/g; s/%28/(/g; s/%29/)/g; s/%5B/[/g; s/%5D/]/g; s/%27/'\''/g')
+            safe_file_name=$(url_decode "$safe_file_name")
             local target_dir="/mnt/SDCARD/Roms/$DL_CHOSEN_FOLDER"
 
             if [ -f "$target_dir/$safe_file_name" ]; then
@@ -1053,7 +1072,7 @@ state_confirm_download() {
     local game_title=$(echo "$game_line" | cut -d'|' -f1 | cut -c 1-22)
     local raw_file_name=$(echo "$game_line" | cut -d'|' -f2)
     local safe_file_name="${raw_file_name##*/}"
-    safe_file_name=$(echo "$safe_file_name" | sed 's/%20/ /g; s/%26/\&/g; s/%28/(/g; s/%29/)/g; s/%5B/[/g; s/%5D/]/g; s/%27/'\''/g')
+    safe_file_name=$(url_decode "$safe_file_name")
     local game_size_mb=$(echo "$game_line" | cut -d'|' -f3)
     local game_size_bytes=$(echo "$game_line" | cut -d'|' -f4) 
     local base_name="${safe_file_name%.*}"
@@ -2294,6 +2313,196 @@ EOF
     UI_RENDER_NEEDED=1
 }
 
+state_prefetch_covers_scan() {
+    build_theme
+    UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Scanning Repositories...\nART:NULL\n"
+    render_ui
+
+    mkdir -p "$CACHE_DIR/previews"
+    > "$CACHE_DIR/prefetch_covers.txt"
+
+    while IFS='|' read -r sys_name sys_fld sys_id sys_ext; do
+        sys_id=$(echo "$sys_id" | tr -d '\r')
+        [ -z "$sys_id" ] && continue
+
+        local libretro_sys=$(get_libretro_system "$sys_fld")
+        [ -z "$libretro_sys" ] && continue
+
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Scanning: ${sys_name}\nART:NULL\n"
+        render_ui
+
+        local list_file="$CACHE_DIR/${sys_id}.list"
+        if [ ! -s "$list_file" ]; then
+            fetch_repo_list "$sys_id" "$sys_ext" "$list_file" "$sys_fld"
+        fi
+        [ -s "$list_file" ] || continue
+
+        local target_dir="/mnt/SDCARD/Roms/${sys_fld}"
+
+        while IFS='|' read -r title raw_name mb bytes; do
+            [ -z "$title" ] && continue
+            [ -s "$CACHE_DIR/previews/${title}.png" ] && continue
+            [ -f "$CACHE_DIR/previews/${title}.png.none" ] && continue
+
+            if [ -s "${target_dir}/Imgs/${title}.png" ]; then
+                # Already downloaded and has its own cover on the SD card - reuse it
+                # instead of fetching it again from the network.
+                cp "${target_dir}/Imgs/${title}.png" "$CACHE_DIR/previews/${title}.png" 2>/dev/null
+                continue
+            fi
+
+            echo "${title}|${libretro_sys}" >> "$CACHE_DIR/prefetch_covers.txt"
+        done < "$list_file"
+
+    done < "$ARCHIVES_FILE"
+
+    if [ -s "$CACHE_DIR/prefetch_covers.txt" ]; then
+        sort -u "$CACHE_DIR/prefetch_covers.txt" -o "$CACHE_DIR/prefetch_covers.txt"
+        STATE="CONFIRM_PREFETCH_COVERS"
+    else
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:All previews already cached!\n"
+        render_ui
+        sleep 2
+        STATE="MAIN_MENU"
+    fi
+    UI_RENDER_NEEDED=1
+}
+
+state_confirm_prefetch_covers() {
+    local total_items=$(wc -l < "$CACHE_DIR/prefetch_covers.txt")
+    [ "$total_items" -le 0 ] && total_items=1
+
+    if [ "$UI_RENDER_NEEDED" -eq 1 ]; then
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Found $total_items Previews to Fetch\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}FOOTER:A/ Start Download   B/ Cancel\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}ART:NULL\n"
+        render_ui
+    fi
+
+    get_key || return
+
+    case "$KEY" in
+        A)
+            play_sound "change"
+            STATE="DO_PREFETCH_COVERS"
+            UI_RENDER_NEEDED=1
+            ;;
+        B)
+            play_sound "back"
+            STATE="MAIN_MENU"
+            UI_RENDER_NEEDED=1
+            ;;
+    esac
+}
+
+state_do_prefetch_covers() {
+    local total_items=$(wc -l < "$CACHE_DIR/prefetch_covers.txt")
+    [ "$total_items" -le 0 ] && total_items=1
+    mkdir -p "$CACHE_DIR/previews"
+
+    rm -f /tmp/prefetch_active /tmp/prefetch_cancel
+    touch /tmp/prefetch_active
+    > "$CACHE_DIR/prefetch_history.txt"
+    echo 0 > "$CACHE_DIR/prefetch_progress.txt"
+
+    (
+        local current_item=0
+        local pids=""
+        while read -r line; do
+            [ -f /tmp/prefetch_cancel ] && break
+            current_item=$((current_item + 1))
+            local base_name=$(echo "$line" | cut -d'|' -f1)
+            local libretro_sys=$(echo "$line" | cut -d'|' -f2)
+
+            sed -i "1i$base_name" "$CACHE_DIR/prefetch_history.txt"
+            echo "$current_item" > "$CACHE_DIR/prefetch_progress.txt"
+
+            fetch_libretro_art_preview "$libretro_sys" "$base_name" "$CACHE_DIR/previews/${base_name}.png" &
+            pids="$pids $!"
+
+            while true; do
+                local running_jobs=0
+                local active_pids=""
+                for p in $pids; do
+                    if kill -0 $p 2>/dev/null; then
+                        running_jobs=$((running_jobs + 1))
+                        active_pids="$active_pids $p"
+                    fi
+                done
+                pids="$active_pids"
+
+                if [ "$running_jobs" -ge 4 ]; then
+                    sleep 0.1
+                else
+                    break
+                fi
+            done
+        done < "$CACHE_DIR/prefetch_covers.txt"
+
+        for p in $pids; do wait $p 2>/dev/null; done
+        rm -f /tmp/prefetch_active
+    ) &
+    local worker_pid=$!
+
+    (
+        while [ -f /tmp/prefetch_active ]; do
+            k=$(./bin/getkey)
+            if [ "$k" = "B" ]; then
+                touch /tmp/prefetch_cancel
+                break
+            fi
+        done
+    ) &
+    local key_pid=$!
+    local was_cancelled=0
+
+    while [ -f /tmp/prefetch_active ]; do
+        local current_item=$(cat "$CACHE_DIR/prefetch_progress.txt" 2>/dev/null)
+        [ -z "$current_item" ] && current_item=0
+        local pct=$(( (current_item * 100) / total_items ))
+
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Fetching Previews $current_item of $total_items\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}HIGHLIGHT:-1\nPROGRESS:$pct\nART:NULL\nFOOTER:B/ Cancel\n"
+
+        local history=$(awk -v s=1 -v e=8 'NR>=s && NR<=e { print substr($0, 1, 28) }' "$CACHE_DIR/prefetch_history.txt" 2>/dev/null)
+        while read -r hist_line; do
+            [ -n "$hist_line" ] && UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:${hist_line}\n"
+        done <<EOF
+$history
+EOF
+        render_ui
+
+        if [ -f /tmp/prefetch_cancel ]; then
+            play_sound "back"
+            kill -9 $worker_pid 2>/dev/null
+            was_cancelled=1
+            break
+        fi
+
+        sleep 0.2
+    done
+
+    kill -9 $key_pid 2>/dev/null
+    rm -f /tmp/prefetch_active /tmp/prefetch_cancel
+
+    build_theme
+    if [ "$was_cancelled" -eq 1 ]; then
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Preview Prefetch Cancelled!\n"
+    else
+        play_sound "confirm"
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Preview Prefetch Finished!\nPROGRESS:100\n"
+    fi
+    render_ui
+    sleep 1.5
+
+    STATE="MAIN_MENU"
+    UI_RENDER_NEEDED=1
+}
+
 # ==========================================
 # 7. BOOT SEQUENCE
 # ==========================================
@@ -2354,6 +2563,9 @@ do
         SCRAPE_ART) state_scrape_art ;;
         CONFIRM_SCRAPE) state_confirm_scrape ;;
         DO_SCRAPE) state_do_scrape ;;
+        PREFETCH_COVERS_SCAN) state_prefetch_covers_scan ;;
+        CONFIRM_PREFETCH_COVERS) state_confirm_prefetch_covers ;;
+        DO_PREFETCH_COVERS) state_do_prefetch_covers ;;
         *) STATE="MAIN_MENU"; UI_RENDER_NEEDED=1 ;;
     esac
 done
