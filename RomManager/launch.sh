@@ -47,6 +47,12 @@ RECENT_INDEX=0
 MISSING_INDEX=0
 FAV_INDEX=0
 SET_INDEX=0
+FOLDER_SELECT_INDEX=0
+PREVIEW_REPO_INDEX=0
+
+MARQUEE_POS=0
+MARQUEE_TICK=0
+DL_KEY_LISTENER_PID=""
 
 DL_CHOSEN_FOLDER=""
 DL_CHOSEN_DISPLAY=""
@@ -292,16 +298,46 @@ toggle_favorite() {
     sed -i '/^$/d' "$FAV_FILE"
 }
 
+url_decode() {
+    printf '%s' "$1" | awk '
+        function hexval(c) {
+            if (c ~ /[0-9]/) return c + 0
+            c = toupper(c)
+            if (c == "A") return 10
+            if (c == "B") return 11
+            if (c == "C") return 12
+            if (c == "D") return 13
+            if (c == "E") return 14
+            if (c == "F") return 15
+            return 0
+        }
+        {
+            s = $0
+            result = ""
+            for (i = 1; i <= length(s); i++) {
+                c = substr(s, i, 1)
+                if (c == "%" && i + 2 <= length(s)) {
+                    result = result sprintf("%c", hexval(substr(s, i+1, 1)) * 16 + hexval(substr(s, i+2, 1)))
+                    i += 2
+                } else {
+                    result = result c
+                }
+            }
+            printf "%s", result
+        }'
+}
+
 # ==========================================
 # 5. DATA LOGIC HELPERS
 # ==========================================
 
 get_libretro_system() {
-    case "$1" in
+    local folder_key=$(echo "$1" | tr '[:lower:]' '[:upper:]')
+    case "$folder_key" in
         "GBA") echo "Nintendo%20-%20Game%20Boy%20Advance" ;;
         "PS") echo "Sony%20-%20PlayStation" ;;
         "FC") echo "Nintendo%20-%20Nintendo%20Entertainment%20System" ;;
-        "SFC") echo "Nintendo%20-%20Super%20Nintendo%20Entertainment%20System" ;;
+        "SFC"|"SNES"|SATELLAVIEW) echo "Nintendo%20-%20Super%20Nintendo%20Entertainment%20System" ;;
         "GB") echo "Nintendo%20-%20Game%20Boy" ;;
         "GBC") echo "Nintendo%20-%20Game%20Boy%20Color" ;;
         "MD") echo "Sega%20-%20Mega%20Drive%20-%20Genesis" ;;
@@ -310,7 +346,57 @@ get_libretro_system() {
         "PCE") echo "NEC%20-%20PC%20Engine%20-%20TurboGrafx%2016" ;;
         "NEOGEO") echo "SNK%20-%20Neo%20Geo" ;;
         "ARCADE") echo "MAME" ;;
-        *) echo "" ;; 
+        *) echo "" ;;
+    esac
+}
+
+# Extra file extensions to automatically accept for a given system folder, on top of the
+# universal defaults (zip|7z|rar|chd) and whatever the user manually set via "Format" in
+# Manage Repositories. This lets a single repo entry pick up e.g. both .zip and .smc SNES
+# dumps, or PS1 .bin (its .cue pair is fetched automatically at download time), without the
+# user having to know or configure it per repo.
+get_auto_extensions() {
+    local folder_key=$(echo "$1" | tr '[:lower:]' '[:upper:]')
+    case "$folder_key" in
+        FC|NES) echo "nes" ;;
+        SFC|SNES|SATELLAVIEW) echo "smc|sfc|bs" ;;
+        GB|SGB) echo "gb" ;;
+        GBC) echo "gbc" ;;
+        GBA) echo "gba" ;;
+        MD) echo "md|gen" ;;
+        GG) echo "gg" ;;
+        SMS) echo "sms" ;;
+        PCE) echo "pce" ;;
+        PS) echo "bin" ;;
+        NGP) echo "ngp" ;;
+        NGPC) echo "ngc" ;;
+        WS) echo "ws" ;;
+        WSC) echo "wsc" ;;
+        ATARI2600) echo "a26" ;;
+        ATARI7800) echo "a78" ;;
+        ATARILYNX) echo "lnx" ;;
+        VB) echo "vb" ;;
+        # CD-based systems: .bin also carries a matching .cue, fetched automatically
+        # at download time (same mechanism as PS1).
+        SEGACD|NEOCD|PCFX) echo "bin" ;;
+        FDS) echo "fds" ;;
+        POKEFAMI) echo "min" ;;
+        NDS) echo "nds" ;;
+        N64) echo "n64|z64|v64" ;;
+        MSX|MSX2) echo "rom|dsk|cas" ;;
+        PICO) echo "p8" ;;
+        FIFTYTWO00) echo "a52" ;;
+        AMIGA) echo "adf|lha" ;;
+        C64) echo "d64|t64|crt" ;;
+        PSP) echo "iso|cso" ;;
+        DC) echo "cdi" ;;
+        32X) echo "32x" ;;
+        TIC80) echo "tic" ;;
+        VECTREX) echo "vec" ;;
+        # ARCADE, CPS1/2/3, NEOGEO, DOS, PORTS, GW, SCUMMVM: no single-file raw dump
+        # format in common use - these are always distributed as zip/7z archives,
+        # already covered by the universal defaults.
+        *) echo "" ;;
     esac
 }
 
@@ -320,6 +406,7 @@ get_console_name() {
         "PS") echo "PlayStation 1" ;;
         "FC") echo "Nintendo NES" ;;
         "SFC") echo "Super Nintendo" ;;
+        "SATELLAVIEW") echo "Satellaview" ;;
         "GB") echo "Game Boy" ;;
         "GBC") echo "Game Boy Color" ;;
         "MD") echo "Sega Genesis" ;;
@@ -372,6 +459,7 @@ fetch_libretro_art() {
     local sys="$1"
     local base="$2"
     local out="$3"
+    local fast="$4"
     local tmp_out="${out}.tmp"
     rm -f "$tmp_out"
 
@@ -394,21 +482,34 @@ fetch_libretro_art() {
     # ---------------------------------------
 
     local base_url="https://thumbnails.libretro.com/${sys}/Named_Boxarts"
-    
-    try_curl() { curl --retry 2 --retry-delay 1 -f -s -L -k --globoff --connect-timeout 5 -m 15 -A "Mozilla/5.0" "$1" -o "$2"; }
+
+    local curl_timeout=15
+    local curl_connect=5
+    local curl_retry=2
+    if [ "$fast" = "1" ]; then
+        curl_timeout=4
+        curl_connect=2
+        curl_retry=0
+    fi
+
+    try_curl() { curl --retry $curl_retry --retry-delay 1 -f -s -L -k --globoff --connect-timeout $curl_connect -m $curl_timeout -A "Mozilla/5.0" "$1" -o "$2"; }
 
     local success=0
-    
+
     # Try the exact GoodTools-translated name first
     if try_curl "${base_url}/$(url_enc "$clean_name").png" "$tmp_out"; then success=1; fi
-    
+
     # Then start hammering the naked title with standard No-Intro suffixes
     if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28USA%2C%20Europe%29.png" "$tmp_out"; then success=1; fi
-    if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28USA%29.png" "$tmp_out"; then success=1; fi
-    if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28Europe%29.png" "$tmp_out"; then success=1; fi
-    if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28World%29.png" "$tmp_out"; then success=1; fi
-    if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28Japan%29.png" "$tmp_out"; then success=1; fi
-    if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name").png" "$tmp_out"; then success=1; fi
+
+    # In fast (browse-preview) mode, stop after the two most common variants to keep navigation snappy
+    if [ "$fast" != "1" ]; then
+        if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28USA%29.png" "$tmp_out"; then success=1; fi
+        if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28Europe%29.png" "$tmp_out"; then success=1; fi
+        if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28World%29.png" "$tmp_out"; then success=1; fi
+        if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name")%20%28Japan%29.png" "$tmp_out"; then success=1; fi
+        if [ $success -eq 0 ] && try_curl "${base_url}/$(url_enc "$naked_name").png" "$tmp_out"; then success=1; fi
+    fi
 
     if [ $success -eq 1 ] && [ -s "$tmp_out" ]; then
         mv "$tmp_out" "$out"
@@ -416,6 +517,108 @@ fetch_libretro_art() {
     else
         rm -f "$tmp_out"
         return 1
+    fi
+}
+
+fetch_libretro_art_preview() {
+    local sys="$1"
+    local base="$2"
+    local out="$3"
+    [ -z "$sys" ] && return 1
+    if fetch_libretro_art "$sys" "$base" "$out" "1"; then
+        return 0
+    else
+        touch "${out}.none"
+        return 1
+    fi
+}
+
+# Scrapes an archive.org item's file listing and writes a decoded "title|raw_filename|Unknown MB|0"
+# cache file (title is percent-decoded and extension-stripped for display; raw_filename stays
+# percent-encoded, since it's used verbatim to build download URLs). Shared by the repo browser
+# (FETCH_XML) and the bulk cover prefetcher, so both cache identically-shaped list files.
+fetch_repo_list() {
+    local archive_id="$1"
+    local ext="$2"
+    local out_file="$3"
+    local folder="$4"
+    local status_file="$5"
+
+    local ext_regex="zip|7z|rar|chd"
+    local auto_ext=$(get_auto_extensions "$folder")
+    [ -n "$auto_ext" ] && ext_regex="${auto_ext}|${ext_regex}"
+    [ -n "$ext" ] && ext_regex="${ext}|${ext_regex}"
+
+    # Large repos (thousands of files) can have a multi-megabyte listing page - give it
+    # a generous ceiling instead of the tighter timeout used for small API calls, so a
+    # slow connection doesn't get cut off mid-download and reported as "empty".
+    local tmp_page="$CACHE_DIR/.tmp_repo_page_$$"
+    curl -s -L -k --retry 2 --retry-delay 1 --connect-timeout 15 -m 90 "https://archive.org/download/${archive_id}/" -o "$tmp_page"
+
+    if [ ! -s "$tmp_page" ]; then
+        rm -f "$tmp_page"
+        [ -n "$status_file" ] && echo "no_connection" > "$status_file"
+        return 1
+    fi
+
+    local tmp_list="$CACHE_DIR/.tmp_repo_list_$$"
+    grep -iEo 'href="[^"]*\.('"$ext_regex"')[^"]*"' "$tmp_page" | cut -d'"' -f2 > "$tmp_list"
+    rm -f "$tmp_page"
+
+    if [ -s "$tmp_list" ]; then
+        awk '
+            function hexval(c) {
+                if (c ~ /[0-9]/) return c + 0
+                c = toupper(c)
+                if (c == "A") return 10
+                if (c == "B") return 11
+                if (c == "C") return 12
+                if (c == "D") return 13
+                if (c == "E") return 14
+                if (c == "F") return 15
+                return 0
+            }
+            function urldecode(s,    result, i, c) {
+                result = ""
+                for (i = 1; i <= length(s); i++) {
+                    c = substr(s, i, 1)
+                    if (c == "%" && i + 2 <= length(s)) {
+                        result = result sprintf("%c", hexval(substr(s, i+1, 1)) * 16 + hexval(substr(s, i+2, 1)))
+                        i += 2
+                    } else {
+                        result = result c
+                    }
+                }
+                return result
+            }
+            {
+                filename = $0;
+                title = filename;
+                sub(/^.*\//, "", title);
+                sub(/\.[^.]+$/, "", title);
+                title = urldecode(title);
+                print title "|" filename "|Unknown MB|0";
+            }
+        ' "$tmp_list" | sort -u > "$out_file"
+    fi
+    rm -f "$tmp_list"
+
+    if [ ! -s "$out_file" ]; then
+        [ -n "$status_file" ] && echo "no_matches" > "$status_file"
+        return 1
+    fi
+    return 0
+}
+
+refresh_previews_have_list() {
+    local previews_mtime=$(stat -c %Y "$CACHE_DIR/previews" 2>/dev/null || echo 0)
+    local last_scanned_mtime=$(cat "$CACHE_DIR/preview_cache_mtime.txt" 2>/dev/null)
+    if [ "$previews_mtime" != "$last_scanned_mtime" ] || [ ! -f "$CACHE_DIR/preview_cache_have.txt" ]; then
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Scanning Preview Cache...\nART:NULL\n"
+        render_ui
+        ls "$CACHE_DIR/previews" 2>/dev/null | grep '\.png$' | sed 's/\.png$//' | sort > "$CACHE_DIR/preview_cache_have.txt"
+        echo "$previews_mtime" > "$CACHE_DIR/preview_cache_mtime.txt"
     fi
 }
 
@@ -466,7 +669,7 @@ EOF
 # ==========================================
 
 state_main_menu() {
-    local total_items=7
+    local total_items=8
 
     if [ "$UI_RENDER_NEEDED" -eq 1 ]; then
         build_theme
@@ -475,6 +678,7 @@ state_main_menu() {
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Installed ROMs Directory\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Favorite Games\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Scrape Missing Box Art\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Prefetch Repo Previews\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Manage Repositories\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Recent Downloads\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Settings & Tools\n"
@@ -499,9 +703,10 @@ state_main_menu() {
                 1) update_local_consoles; STATE="INST_CONSOLES" ;;
                 2) STATE="FAVORITES" ;;
                 3) STATE="SCRAPE_ART" ;;
-                4) STATE="MANAGE_REPOS" ;;
-                5) STATE="RECENT_DOWNLOADS" ;;
-                6) STATE="SETTINGS" ;;
+                4) STATE="PREFETCH_COVERS_SCAN" ;;
+                5) STATE="MANAGE_REPOS" ;;
+                6) STATE="RECENT_DOWNLOADS" ;;
+                7) STATE="SETTINGS" ;;
             esac
             UI_RENDER_NEEDED=1
             ;;
@@ -530,7 +735,7 @@ state_settings() {
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Auto Scrape Cover [$scrape_txt]\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:Repo Cache (Days) [$REPO_CACHE_DAYS]\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:-> Clear Repo Cache\n"
-        UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:-> Clear Preview Cache\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:-> Manage Preview Cache\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:-> Rebuild Local Database\n"
         
         UI_FRAME_BUF="${UI_FRAME_BUF}HIGHLIGHT:$SET_INDEX\n"
@@ -568,10 +773,9 @@ state_settings() {
                     render_ui; sleep 1.5
                     ;;
                 6)
-                    rm -f "$CACHE_DIR/previews"/*.png
-                    build_theme
-                    UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Preview Cache Cleared!\n"
-                    render_ui; sleep 1.5
+                    PREVIEW_REPO_INDEX=0
+                    > "$CACHE_DIR/preview_scope_selected.txt"
+                    STATE="SELECT_PREVIEW_REPO"
                     ;;
                 7)
                     force_update_local_consoles
@@ -589,6 +793,193 @@ state_settings() {
             UI_RENDER_NEEDED=1
             ;;
     esac
+}
+
+state_select_preview_repo() {
+    awk -F'|' 'BEGIN{print "[ALL REPOSITORIES]|__ALL__"} $3!=""{print $1"|"$3}' "$ARCHIVES_FILE" > "$CACHE_DIR/preview_scope_list.txt"
+
+    local total_items=$(wc -l < "$CACHE_DIR/preview_scope_list.txt")
+    [ "$total_items" -le 0 ] && total_items=1
+    local selected_count=$(wc -l < "$CACHE_DIR/preview_scope_selected.txt" 2>/dev/null)
+    [ -z "$selected_count" ] && selected_count=0
+
+    if [ "$UI_RENDER_NEEDED" -eq 1 ]; then
+        local start_item=$((PREVIEW_REPO_INDEX - 4))
+        [ "$start_item" -lt 0 ] && start_item=0
+        local end_item=$((start_item + UI_MAX_ITEMS - 1))
+        [ "$end_item" -ge "$total_items" ] && end_item=$((total_items - 1))
+        if [ $((end_item - start_item + 1)) -lt $UI_MAX_ITEMS ] && [ "$total_items" -ge $UI_MAX_ITEMS ]; then
+            start_item=$((end_item - UI_MAX_ITEMS + 1))
+            [ "$start_item" -lt 0 ] && start_item=0
+        fi
+
+        local human_pos=$((PREVIEW_REPO_INDEX + 1))
+        local scroll_pct=0
+        [ "$total_items" -gt 1 ] && scroll_pct=$(( (PREVIEW_REPO_INDEX * 100) / (total_items - 1) ))
+
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Manage Preview Cache ($selected_count selected)\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}FOOTER:A/ Toggle  Y/ All  X/ None  Start/ Delete  B/ Back  [$human_pos/$total_items]\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}SCROLLBAR:$scroll_pct\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}ART:NULL\n"
+
+        local total_real=$((total_items - 1))
+        if [ -s "$CACHE_DIR/preview_scope_selected.txt" ]; then
+            local items=$(awk -F'|' -v start=$((start_item + 1)) -v end=$((end_item + 1)) -v sel_count="$selected_count" -v total_real="$total_real" '
+                NR==FNR { sel[$0]=1; next }
+                (FNR>=start && FNR<=end) {
+                    if ($2 == "__ALL__") {
+                        mark = (sel_count > 0 && sel_count == total_real) ? "*" : "-";
+                    } else {
+                        mark = ($2 in sel) ? "*" : "-";
+                    }
+                    print mark substr($1, 1, 27);
+                }
+            ' "$CACHE_DIR/preview_scope_selected.txt" "$CACHE_DIR/preview_scope_list.txt")
+        else
+            local items=$(awk -F'|' -v start=$((start_item + 1)) -v end=$((end_item + 1)) '
+                NR>=start && NR<=end { print "-" substr($1, 1, 27) }
+            ' "$CACHE_DIR/preview_scope_list.txt")
+        fi
+        while read -r name; do
+            [ -n "$name" ] && UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:${name}\n"
+        done <<EOF
+$items
+EOF
+
+        local rel=$((PREVIEW_REPO_INDEX - start_item))
+        UI_FRAME_BUF="${UI_FRAME_BUF}HIGHLIGHT:$rel\n"
+        render_ui
+    fi
+
+    get_key || return
+
+    case "$KEY" in
+        down|up|right|left)
+            play_sound "change"
+            PREVIEW_REPO_INDEX=$(update_selection "$KEY" "$total_items" "$UI_MAX_ITEMS" "$PREVIEW_REPO_INDEX")
+            UI_RENDER_NEEDED=1
+            ;;
+        A)
+            play_sound "change"
+            local chosen_id=$(sed -n "$((PREVIEW_REPO_INDEX + 1))p" "$CACHE_DIR/preview_scope_list.txt" | cut -d'|' -f2)
+            if [ "$chosen_id" = "__ALL__" ]; then
+                local total_real=$(( $(wc -l < "$CACHE_DIR/preview_scope_list.txt") - 1 ))
+                if [ "$selected_count" -gt 0 ] && [ "$selected_count" -eq "$total_real" ]; then
+                    > "$CACHE_DIR/preview_scope_selected.txt"
+                else
+                    awk -F'|' '$2!="__ALL__"{print $2}' "$CACHE_DIR/preview_scope_list.txt" > "$CACHE_DIR/preview_scope_selected.txt"
+                fi
+            elif grep -qxF "$chosen_id" "$CACHE_DIR/preview_scope_selected.txt" 2>/dev/null; then
+                grep -vxF "$chosen_id" "$CACHE_DIR/preview_scope_selected.txt" > "$CACHE_DIR/preview_scope_selected.txt.tmp"
+                mv "$CACHE_DIR/preview_scope_selected.txt.tmp" "$CACHE_DIR/preview_scope_selected.txt"
+            else
+                echo "$chosen_id" >> "$CACHE_DIR/preview_scope_selected.txt"
+            fi
+            UI_RENDER_NEEDED=1
+            ;;
+        Y)
+            play_sound "change"
+            awk -F'|' '$2!="__ALL__"{print $2}' "$CACHE_DIR/preview_scope_list.txt" > "$CACHE_DIR/preview_scope_selected.txt"
+            UI_RENDER_NEEDED=1
+            ;;
+        X)
+            play_sound "change"
+            > "$CACHE_DIR/preview_scope_selected.txt"
+            UI_RENDER_NEEDED=1
+            ;;
+        start)
+            if [ "$selected_count" -eq 0 ]; then
+                play_sound "back"
+                build_theme
+                UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Nothing Selected!\n"
+                render_ui
+                sleep 1
+                UI_RENDER_NEEDED=1
+            else
+                play_sound "change"
+                refresh_previews_have_list
+
+                > "$CACHE_DIR/preview_delete_targets.txt"
+                while read -r repo_id; do
+                    [ -z "$repo_id" ] && continue
+                    local repo_list="$CACHE_DIR/${repo_id}.list"
+                    [ -s "$repo_list" ] || continue
+                    [ -s "$CACHE_DIR/preview_cache_have.txt" ] || continue
+                    # Intersect this repo's known titles with what's actually cached
+                    # as a preview - a single in-memory join, no per-title stat()s.
+                    awk -F'|' '
+                        NR==FNR { have[$0]=1; next }
+                        ($1 in have) { print $1 }
+                    ' "$CACHE_DIR/preview_cache_have.txt" "$repo_list" >> "$CACHE_DIR/preview_delete_targets.txt"
+                done < "$CACHE_DIR/preview_scope_selected.txt"
+                sort -u "$CACHE_DIR/preview_delete_targets.txt" -o "$CACHE_DIR/preview_delete_targets.txt"
+
+                if [ -s "$CACHE_DIR/preview_delete_targets.txt" ]; then
+                    STATE="CONFIRM_DELETE_PREVIEWS"
+                else
+                    build_theme
+                    UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:No Cached Previews for Selection!\n"
+                    render_ui
+                    sleep 1.5
+                fi
+                UI_RENDER_NEEDED=1
+            fi
+            ;;
+        B)
+            play_sound "back"
+            > "$CACHE_DIR/preview_scope_selected.txt"
+            STATE="SETTINGS"
+            UI_RENDER_NEEDED=1
+            ;;
+    esac
+}
+
+state_confirm_delete_previews() {
+    local target_count=$(wc -l < "$CACHE_DIR/preview_delete_targets.txt" 2>/dev/null)
+    [ -z "$target_count" ] && target_count=0
+
+    build_theme
+    UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Delete $target_count cached preview(s)?\nHIGHLIGHT:0\nFOOTER:A/ Yes, Delete   B/ Cancel\nART:NULL\n"
+    render_ui
+
+    while true; do
+        get_key || continue
+
+        case "$KEY" in
+            A)
+                play_sound "change"
+                while read -r name; do
+                    [ -z "$name" ] && continue
+                    rm -f "$CACHE_DIR/previews/${name}.png" "$CACHE_DIR/previews/${name}.png.none"
+                done < "$CACHE_DIR/preview_delete_targets.txt"
+
+                if [ -f "$CACHE_DIR/preview_cache_have.txt" ]; then
+                    grep -vxFf "$CACHE_DIR/preview_delete_targets.txt" "$CACHE_DIR/preview_cache_have.txt" > "$CACHE_DIR/preview_cache_have.txt.tmp"
+                    mv "$CACHE_DIR/preview_cache_have.txt.tmp" "$CACHE_DIR/preview_cache_have.txt"
+                fi
+                > "$CACHE_DIR/preview_scope_selected.txt"
+
+                stat -c %Y "$CACHE_DIR/previews" 2>/dev/null > "$CACHE_DIR/preview_cache_mtime.txt"
+
+                play_sound "confirm"
+                build_theme
+                UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:$target_count Preview(s) Deleted!\n"
+                render_ui
+                sleep 1.5
+
+                STATE="SELECT_PREVIEW_REPO"
+                UI_RENDER_NEEDED=1
+                return
+                ;;
+            B)
+                play_sound "back"
+                STATE="SELECT_PREVIEW_REPO"
+                UI_RENDER_NEEDED=1
+                return
+                ;;
+        esac
+    done
 }
 
 state_dl_consoles() {
@@ -688,21 +1079,17 @@ state_fetch_xml() {
     UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Connecting to Server...\nPROGRESS:0\n"
     render_ui
 
-    local ext_regex="zip|7z|rar|chd"
-    [ -n "$DL_EXT" ] && ext_regex="${DL_EXT}|${ext_regex}"
+    local cache_file="$CACHE_DIR/${DL_ARCHIVE_ID}.list"
+    local status_file="$CACHE_DIR/.fetch_status"
 
-    rm -f /tmp/xml_active /tmp/xml_cancel
-    touch /tmp/xml_active
-    rm -f "$CACHE_DIR/tmp_files.txt"
-    
+    rm -f /tmp/xml_active /tmp/xml_cancel "$status_file"
+
     (
-        curl -s -L -k --retry 2 --connect-timeout 8 -m 30 "https://archive.org/download/${DL_ARCHIVE_ID}/" \
-        | grep -iEo 'href="[^"]*\.('"$ext_regex"')[^"]*"' \
-        | cut -d'"' -f2 > "$CACHE_DIR/tmp_files.txt"
+        fetch_repo_list "$DL_ARCHIVE_ID" "$DL_EXT" "$cache_file" "$DL_CHOSEN_FOLDER" "$status_file"
         rm -f /tmp/xml_active
     ) &
     local curl_pid=$!
-    
+
     (
         while [ -f /tmp/xml_active ]; do
             k=$(./bin/getkey)
@@ -713,61 +1100,51 @@ state_fetch_xml() {
         done
     ) &
     local key_pid=$!
-    
+
     local prog_val=0
     local spin_idx=0
-    
+
     while [ -f /tmp/xml_active ]; do
         if [ -f /tmp/xml_cancel ]; then
             play_sound "back"
             kill -9 $curl_pid 2>/dev/null
-            rm -f /tmp/xml_active "$CACHE_DIR/tmp_files.txt" /tmp/xml_cancel
+            rm -f /tmp/xml_active "$cache_file" /tmp/xml_cancel
             STATE="DL_CONSOLES"
             UI_RENDER_NEEDED=1
             kill -9 $key_pid 2>/dev/null
             return
         fi
-        
+
         spin_idx=$(( (spin_idx + 1) % 4 ))
         local spin_char=""
         case $spin_idx in 0) spin_char="|";; 1) spin_char="/";; 2) spin_char="-";; 3) spin_char="\\";; esac
-        
+
         prog_val=$(( (prog_val + 5) % 100 ))
-        
+
         build_theme
         UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Connecting... [$spin_char]\nPROGRESS:$prog_val\nFOOTER:B/ Cancel\n"
         render_ui
         sleep 0.1
     done
-    
+
     kill -9 $key_pid 2>/dev/null
-    
-    if [ -s "$CACHE_DIR/tmp_files.txt" ]; then
-        local cache_file="$CACHE_DIR/${DL_ARCHIVE_ID}.list"
-        awk '{
-            filename = $0;
-            title = filename;
-            sub(/^.*\//, "", title);
-            sub(/\.[^.]+$/, "", title);
-            gsub(/%20/, " ", title);
-            gsub(/%26/, "\\&", title);
-            gsub(/%28/, "(", title);
-            gsub(/%29/, ")", title);
-            gsub(/%5B/, "[", title);
-            gsub(/%5D/, "]", title);
-            gsub(/%27/, "'\''", title);
-            print title "|" filename "|Unknown MB|0";
-        }' "$CACHE_DIR/tmp_files.txt" | sort -u > "$cache_file"
-        
-        rm -f "$CACHE_DIR/tmp_files.txt"
+
+    if [ -s "$cache_file" ]; then
         cp "$cache_file" "$CACHE_DIR/current_games.cache"
         rm -f "$CACHE_DIR/current_games_full.cache"
         STATE="DL_GAMES"
         DL_INDEX=0
+        MARQUEE_POS=0
+        MARQUEE_TICK=0
     else
+        local reason=$(cat "$status_file" 2>/dev/null)
         play_sound "back"
         build_theme
-        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Connection Failed/Empty!\n"
+        if [ "$reason" = "no_connection" ]; then
+            UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Connection Failed! Check your network.\n"
+        else
+            UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:No Matching Files Found in Repo!\n"
+        fi
         render_ui
         sleep 2
         STATE="DL_CONSOLES"
@@ -777,6 +1154,8 @@ state_fetch_xml() {
 
 state_dl_games() {
     if [ ! -s "$CACHE_DIR/current_games.cache" ] && [ ! -f "$CACHE_DIR/current_games_full.cache" ]; then
+        [ -n "$DL_KEY_LISTENER_PID" ] && kill -9 "$DL_KEY_LISTENER_PID" 2>/dev/null
+        DL_KEY_LISTENER_PID=""
         STATE="DL_CONSOLES"
         UI_RENDER_NEEDED=1
         return
@@ -804,7 +1183,7 @@ state_dl_games() {
         
         local raw_file_name=$(echo "$game_line" | cut -d'|' -f2)
         local safe_file_name="${raw_file_name##*/}"
-        safe_file_name=$(echo "$safe_file_name" | sed 's/%20/ /g; s/%26/\&/g; s/%28/(/g; s/%29/)/g; s/%5B/[/g; s/%5D/]/g; s/%27/'\''/g')
+        safe_file_name=$(url_decode "$safe_file_name")
         
         local base_name="${safe_file_name%.*}"
         local target_dir="/mnt/SDCARD/Roms/$DL_CHOSEN_FOLDER"
@@ -824,10 +1203,16 @@ state_dl_games() {
         UI_FRAME_BUF="${UI_FRAME_BUF}FOOTER:A/ DL   Start/ Fav   Sel/ Search   B/ Back  [$human_pos/$total_items]\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}SCROLLBAR:$scroll_pct\n"
 
-        local items=$(awk -F'|' "NR>=$((start_item + 1)) && NR<=$((end_item + 1)) { 
+        local hl_line=$((DL_INDEX + 1))
+        local items=$(awk -F'|' -v hl_line="$hl_line" -v mq_pos="$MARQUEE_POS" "NR>=$((start_item + 1)) && NR<=$((end_item + 1)) {
             name = \$1;
-            sub(/\.[^.]+$/, \"\", name); 
-            print substr(name, 1, 28) 
+            sub(/\.[^.]+$/, \"\", name);
+            if (NR == hl_line && length(name) > 28) {
+                padded = name \"   \" name;
+                print substr(padded, mq_pos + 1, 28);
+            } else {
+                print substr(name, 1, 28);
+            }
         }" "$CACHE_DIR/current_games.cache")
         while read -r name; do
             [ -n "$name" ] && UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:${name}\n"
@@ -837,6 +1222,8 @@ EOF
 
         if [ "$is_installed" -eq 1 ] && [ -s "$target_dir/Imgs/${base_name}.png" ]; then
             UI_FRAME_BUF="${UI_FRAME_BUF}ART:$target_dir/Imgs/${base_name}.png\n"
+        elif [ -s "$CACHE_DIR/previews/${base_name}.png" ]; then
+            UI_FRAME_BUF="${UI_FRAME_BUF}ART:$CACHE_DIR/previews/${base_name}.png\n"
         else
             UI_FRAME_BUF="${UI_FRAME_BUF}ART:BLANK\n"
         fi
@@ -846,12 +1233,46 @@ EOF
         render_ui
     fi
 
-    get_key || return
+    # ./bin/getkey blocks until a key event arrives, so calling it directly here (like every
+    # other screen does) would freeze the marquee animation while the player isn't touching
+    # anything - this screen would just sit waiting for the next press with no idle ticks in
+    # between. Run it in a background listener instead (the same trick FETCH_XML/DOWNLOAD use
+    # for their cancel-listeners) and poll for its result; while it's still waiting, this is
+    # an idle tick and the marquee gets to advance.
+    if [ -z "$DL_KEY_LISTENER_PID" ]; then
+        rm -f "$CACHE_DIR/.dl_key_result"
+        ( ./bin/getkey > "$CACHE_DIR/.dl_key_result" 2>/dev/null ) &
+        DL_KEY_LISTENER_PID=$!
+    fi
+
+    if kill -0 "$DL_KEY_LISTENER_PID" 2>/dev/null; then
+        KEY=""
+    else
+        KEY=$(cat "$CACHE_DIR/.dl_key_result" 2>/dev/null)
+        DL_KEY_LISTENER_PID=""
+    fi
+
+    if [ -z "$KEY" ]; then
+        sleep 0.08
+        local hl_title=$(sed -n "$((DL_INDEX + 1))p" "$CACHE_DIR/current_games.cache" | cut -d'|' -f1)
+        if [ ${#hl_title} -gt 28 ]; then
+            MARQUEE_TICK=$((MARQUEE_TICK + 1))
+            if [ "$MARQUEE_TICK" -ge 3 ]; then
+                MARQUEE_TICK=0
+                MARQUEE_POS=$(( (MARQUEE_POS + 1) % (${#hl_title} + 3) ))
+                UI_RENDER_NEEDED=1
+            fi
+        fi
+        return
+    fi
+    sleep 0.02
 
     case "$KEY" in
         down|up|right|left)
             play_sound "change"
             DL_INDEX=$(update_selection "$KEY" "$total_items" "$UI_MAX_ITEMS" "$DL_INDEX")
+            MARQUEE_POS=0
+            MARQUEE_TICK=0
             UI_RENDER_NEEDED=1
             ;;
         select)
@@ -868,7 +1289,7 @@ EOF
             local title=$(echo "$game_line" | cut -d'|' -f1)
             local raw_file_name=$(echo "$game_line" | cut -d'|' -f2)
             local safe_file_name="${raw_file_name##*/}"
-            safe_file_name=$(echo "$safe_file_name" | sed 's/%20/ /g; s/%26/\&/g; s/%28/(/g; s/%29/)/g; s/%5B/[/g; s/%5D/]/g; s/%27/'\''/g')
+            safe_file_name=$(url_decode "$safe_file_name")
             toggle_favorite "${DL_CHOSEN_FOLDER}|${safe_file_name}|${title}"
             UI_RENDER_NEEDED=1
             ;;
@@ -893,7 +1314,7 @@ EOF
             local game_line=$(sed -n "$((DL_INDEX + 1))p" "$CACHE_DIR/current_games.cache")
             local raw_file_name=$(echo "$game_line" | cut -d'|' -f2)
             local safe_file_name="${raw_file_name##*/}"
-            safe_file_name=$(echo "$safe_file_name" | sed 's/%20/ /g; s/%26/\&/g; s/%28/(/g; s/%29/)/g; s/%5B/[/g; s/%5D/]/g; s/%27/'\''/g')
+            safe_file_name=$(url_decode "$safe_file_name")
             local target_dir="/mnt/SDCARD/Roms/$DL_CHOSEN_FOLDER"
 
             if [ -f "$target_dir/$safe_file_name" ]; then
@@ -920,7 +1341,7 @@ state_confirm_download() {
     local game_title=$(echo "$game_line" | cut -d'|' -f1 | cut -c 1-22)
     local raw_file_name=$(echo "$game_line" | cut -d'|' -f2)
     local safe_file_name="${raw_file_name##*/}"
-    safe_file_name=$(echo "$safe_file_name" | sed 's/%20/ /g; s/%26/\&/g; s/%28/(/g; s/%29/)/g; s/%5B/[/g; s/%5D/]/g; s/%27/'\''/g')
+    safe_file_name=$(url_decode "$safe_file_name")
     local game_size_mb=$(echo "$game_line" | cut -d'|' -f3)
     local game_size_bytes=$(echo "$game_line" | cut -d'|' -f4) 
     local base_name="${safe_file_name%.*}"
@@ -1023,7 +1444,32 @@ state_confirm_download() {
                     mv "$target_dir/.tmp_$safe_file_name" "$target_dir/$safe_file_name"
                     invalidate_game_cache
                     force_update_local_consoles
-                    
+
+                    # Bin/Cue disc images: the .cue sheet is a separate file on the archive
+                    # sharing the same base name as the .bin - fetch it alongside automatically.
+                    # Detected from the actual downloaded file's extension (not a per-repo
+                    # setting), so it works whether .bin showed up via the automatic PS1
+                    # extension or a manually configured repo format.
+                    local cue_raw_name=$(echo "$raw_file_name" | sed 's/\.[Bb][Ii][Nn]$/.cue/')
+                    if [ "$cue_raw_name" != "$raw_file_name" ]; then
+                        local safe_cue_name="${cue_raw_name##*/}"
+                        safe_cue_name=$(url_decode "$safe_cue_name")
+                        local cue_url="https://archive.org/download/${DL_ARCHIVE_ID}/${cue_raw_name}"
+
+                        build_theme
+                        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Downloading matching .cue...\nPROGRESS:95\nART:$preview_path\n"
+                        render_ui
+
+                        curl --fail --retry 3 --retry-delay 1 -f -s -L -k --connect-timeout 10 -A "Mozilla/5.0" "$cue_url" -o "$target_dir/$safe_cue_name" < /dev/null
+                        if [ ! -s "$target_dir/$safe_cue_name" ]; then
+                            rm -f "$target_dir/$safe_cue_name"
+                            build_theme
+                            UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Warning: .cue file not found on repo!\nART:$preview_path\n"
+                            render_ui
+                            sleep 1.5
+                        fi
+                    fi
+
                     if [ "$preview_path" != "BLANK" ]; then
                         mkdir -p "$target_dir/Imgs"
                         cp "$preview_path" "$target_dir/Imgs/${base_name}.png"
@@ -1682,9 +2128,14 @@ state_manage_repos() {
         local scroll_pct=0
         [ "$total_items" -gt 1 ] && scroll_pct=$(( (REPO_INDEX * 100) / (total_items - 1) ))
 
+        local cur_entry=$(sed -n "$((REPO_INDEX + 1))p" "$ARCHIVES_FILE")
+        local cur_fld=$(echo "$cur_entry" | cut -d'|' -f2)
+        local cur_ext=$(echo "$cur_entry" | cut -d'|' -f4 | tr -d '\r')
+        [ -z "$cur_ext" ] && cur_ext="none"
+
         build_theme
-        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Manage Repositories\n"
-        UI_FRAME_BUF="${UI_FRAME_BUF}FOOTER:<-/-> Page  A/ Edit  Y/ Clear Cache  B/ Back\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Manage Repositories [Fld: $cur_fld | Fmt: $cur_ext]\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}FOOTER:A/ Edit  X/ Format  Sel/ Folder  Y/ Clear  B/ Back\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}SCROLLBAR:$scroll_pct\n"
         UI_FRAME_BUF="${UI_FRAME_BUF}ART:NULL\n"
 
@@ -1721,6 +2172,58 @@ EOF
             fi
             UI_RENDER_NEEDED=1
             ;;
+        X)
+            play_sound "change"
+            local line_num=$((REPO_INDEX + 1))
+            local entry=$(sed -n "${line_num}p" "$ARCHIVES_FILE")
+            local sys_name=$(echo "$entry" | cut -d'|' -f1)
+            local sys_fld=$(echo "$entry" | cut -d'|' -f2)
+            local sys_id=$(echo "$entry" | cut -d'|' -f3 | tr -d '\r')
+            local cur_ext=$(echo "$entry" | cut -d'|' -f4 | tr -d '\r')
+            local new_ext=""
+            case "$cur_ext" in
+                zip) new_ext="chd" ;;
+                chd) new_ext="bin" ;;
+                bin) new_ext="7z" ;;
+                7z) new_ext="rar" ;;
+                rar) new_ext="pce" ;;
+                pce) new_ext="gbc" ;;
+                gbc) new_ext="zip" ;;
+                *) new_ext="zip" ;;
+            esac
+            sed -i "${line_num}c\\${sys_name}|${sys_fld}|${sys_id}|${new_ext}" "$ARCHIVES_FILE"
+            # The cached listing was scraped with the old format filter - invalidate it so
+            # the next visit re-fetches with the new one instead of silently reusing stale
+            # results (this is exactly what made a manually-added extension look ignored).
+            [ -n "$sys_id" ] && rm -f "$CACHE_DIR/${sys_id}.list"
+            UI_RENDER_NEEDED=1
+            ;;
+        select)
+            play_sound "change"
+            REPO_EDIT_LINE_NUM=$((REPO_INDEX + 1))
+            local entry=$(sed -n "${REPO_EDIT_LINE_NUM}p" "$ARCHIVES_FILE")
+            REPO_NEW_SYS_NAME=$(echo "$entry" | cut -d'|' -f1)
+            REPO_NEW_SYS_ID=$(echo "$entry" | cut -d'|' -f3 | tr -d '\r')
+            REPO_NEW_SYS_EXT=$(echo "$entry" | cut -d'|' -f4 | tr -d '\r')
+
+            > "$CACHE_DIR/roms_folders.list"
+            for dir in /mnt/SDCARD/Roms/*; do
+                [ -d "$dir" ] || continue
+                echo "${dir##*/}" >> "$CACHE_DIR/roms_folders.list"
+            done
+            sort -u "$CACHE_DIR/roms_folders.list" -o "$CACHE_DIR/roms_folders.list"
+
+            if [ ! -s "$CACHE_DIR/roms_folders.list" ]; then
+                build_theme
+                UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:No folders found in /Roms!\n"
+                render_ui
+                sleep 1.5
+            else
+                FOLDER_SELECT_INDEX=0
+                STATE="SELECT_REPO_FOLDER"
+            fi
+            UI_RENDER_NEEDED=1
+            ;;
         A)
             play_sound "change"
             REPO_EDIT_LINE_NUM=$((REPO_INDEX + 1))
@@ -1737,6 +2240,67 @@ EOF
         B)
             play_sound "back"
             STATE="MAIN_MENU"
+            UI_RENDER_NEEDED=1
+            ;;
+    esac
+}
+
+state_select_repo_folder() {
+    local total_items=$(wc -l < "$CACHE_DIR/roms_folders.list")
+    [ "$total_items" -le 0 ] && total_items=1
+
+    if [ "$UI_RENDER_NEEDED" -eq 1 ]; then
+        local start_item=$((FOLDER_SELECT_INDEX - 4))
+        [ "$start_item" -lt 0 ] && start_item=0
+        local end_item=$((start_item + UI_MAX_ITEMS - 1))
+        [ "$end_item" -ge "$total_items" ] && end_item=$((total_items - 1))
+        if [ $((end_item - start_item + 1)) -lt $UI_MAX_ITEMS ] && [ "$total_items" -ge $UI_MAX_ITEMS ]; then
+            start_item=$((end_item - UI_MAX_ITEMS + 1))
+            [ "$start_item" -lt 0 ] && start_item=0
+        fi
+
+        local human_pos=$((FOLDER_SELECT_INDEX + 1))
+        local scroll_pct=0
+        [ "$total_items" -gt 1 ] && scroll_pct=$(( (FOLDER_SELECT_INDEX * 100) / (total_items - 1) ))
+
+        local truncated_name=$(echo "$REPO_NEW_SYS_NAME" | cut -c 1-18)
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Target Folder for ${truncated_name}\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}FOOTER:<-/-> Page   A/ Set   B/ Cancel  [$human_pos/$total_items]\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}SCROLLBAR:$scroll_pct\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}ART:NULL\n"
+
+        local items=$(awk "NR>=$((start_item + 1)) && NR<=$((end_item + 1)) { print substr(\$0, 1, 28) }" "$CACHE_DIR/roms_folders.list")
+        while read -r name; do
+            [ -n "$name" ] && UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:${name}\n"
+        done <<EOF
+$items
+EOF
+
+        local rel=$((FOLDER_SELECT_INDEX - start_item))
+        UI_FRAME_BUF="${UI_FRAME_BUF}HIGHLIGHT:$rel\n"
+        render_ui
+    fi
+
+    get_key || return
+
+    case "$KEY" in
+        down|up|right|left)
+            play_sound "change"
+            FOLDER_SELECT_INDEX=$(update_selection "$KEY" "$total_items" "$UI_MAX_ITEMS" "$FOLDER_SELECT_INDEX")
+            UI_RENDER_NEEDED=1
+            ;;
+        A)
+            play_sound "change"
+            local new_folder=$(sed -n "$((FOLDER_SELECT_INDEX + 1))p" "$CACHE_DIR/roms_folders.list")
+            sed -i "${REPO_EDIT_LINE_NUM}c\\${REPO_NEW_SYS_NAME}|${new_folder}|${REPO_NEW_SYS_ID}|${REPO_NEW_SYS_EXT}" "$ARCHIVES_FILE"
+            [ -n "$REPO_NEW_SYS_ID" ] && rm -f "$CACHE_DIR/${REPO_NEW_SYS_ID}.list"
+            STATE="MANAGE_REPOS"
+            UI_RENDER_NEEDED=1
+            ;;
+        B)
+            play_sound "back"
+            STATE="MANAGE_REPOS"
             UI_RENDER_NEEDED=1
             ;;
     esac
@@ -1811,8 +2375,44 @@ state_validate_repo() {
         sed -i "${REPO_EDIT_LINE_NUM}c\\${REPO_NEW_SYS_NAME}|${REPO_NEW_SYS_FLD}||${REPO_NEW_SYS_EXT}" "$ARCHIVES_FILE"
         STATE="MANAGE_REPOS"
     else
-        if curl -s -L -k -m 10 "https://archive.org/metadata/${OSK_BUF}" | grep -q '"files"'; then
-            sed -i "${REPO_EDIT_LINE_NUM}c\\${REPO_NEW_SYS_NAME}|${REPO_NEW_SYS_FLD}|${OSK_BUF}|${REPO_NEW_SYS_EXT}" "$ARCHIVES_FILE"
+        local resolved_id="$OSK_BUF"
+        local meta_json=$(curl -s -L -k -m 10 "https://archive.org/metadata/${resolved_id}")
+
+        if ! echo "$meta_json" | grep -q '"files"'; then
+            build_theme
+            UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Trying case-insensitive match...\nPROGRESS:75\n"
+            render_ui
+
+            local search_json=$(curl -s -L -k -m 10 -G \
+                --data-urlencode "q=identifier:${OSK_BUF}" \
+                --data-urlencode "fl[]=identifier" \
+                --data-urlencode "rows=1" \
+                --data-urlencode "output=json" \
+                "https://archive.org/advancedsearch.php")
+            resolved_id=$(echo "$search_json" | grep -o '"identifier":"[^"]*"' | head -n1 | cut -d'"' -f4)
+
+            if [ -n "$resolved_id" ]; then
+                meta_json=$(curl -s -L -k -m 10 "https://archive.org/metadata/${resolved_id}")
+            fi
+        fi
+
+        if [ -n "$resolved_id" ] && echo "$meta_json" | grep -q '"files"'; then
+            if echo "$meta_json" | grep -q '"access-restricted-item":"true"'; then
+                # Some archive.org items require a logged-in/borrowed session to download
+                # their files (their file listing shows filenames but no download links,
+                # and direct downloads return 401). RomManager has no login support, so
+                # these repos can never actually download - reject them here instead of
+                # letting the user hit a confusing "Connection Failed" later.
+                play_sound "back"
+                build_theme
+                UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Repo is Restricted (needs archive.org login)!\n"
+                render_ui
+                sleep 2.5
+                STATE="OSK_INPUT"
+                UI_RENDER_NEEDED=1
+                return
+            fi
+            sed -i "${REPO_EDIT_LINE_NUM}c\\${REPO_NEW_SYS_NAME}|${REPO_NEW_SYS_FLD}|${resolved_id}|${REPO_NEW_SYS_EXT}" "$ARCHIVES_FILE"
             STATE="MANAGE_REPOS"
         else
             play_sound "back"
@@ -1987,6 +2587,248 @@ EOF
     UI_RENDER_NEEDED=1
 }
 
+state_prefetch_covers_scan() {
+    local total_repos=$(awk -F'|' '$3!=""' "$ARCHIVES_FILE" | wc -l)
+    [ "$total_repos" -le 0 ] && total_repos=1
+
+    mkdir -p "$CACHE_DIR/previews"
+    > "$CACHE_DIR/prefetch_covers.txt"
+
+    rm -f /tmp/scan_active /tmp/scan_cancel
+    touch /tmp/scan_active
+    echo "0|Starting..." > "$CACHE_DIR/scan_progress.txt"
+
+    # Runs the actual filesystem/network work in the background so the UI can keep
+    # redrawing (progress + cancel) instead of freezing for the whole scan. Per-repo
+    # queue lines are buffered in memory and flushed with a single append, instead of
+    # opening the output file once per game - on SD card storage, thousands of tiny
+    # writes (one per title) were the main reason this used to look like a hang.
+    (
+        local repo_num=0
+        while IFS='|' read -r sys_name sys_fld sys_id sys_ext; do
+            [ -f /tmp/scan_cancel ] && break
+            sys_id=$(echo "$sys_id" | tr -d '\r')
+            [ -z "$sys_id" ] && continue
+
+            local libretro_sys=$(get_libretro_system "$sys_fld")
+            [ -z "$libretro_sys" ] && continue
+
+            repo_num=$((repo_num + 1))
+            echo "${repo_num}|${sys_name}" > "$CACHE_DIR/scan_progress.txt"
+
+            local list_file="$CACHE_DIR/${sys_id}.list"
+            if [ ! -s "$list_file" ]; then
+                fetch_repo_list "$sys_id" "$sys_ext" "$list_file" "$sys_fld"
+            fi
+            [ -s "$list_file" ] || continue
+
+            local target_dir="/mnt/SDCARD/Roms/${sys_fld}"
+            local queue=""
+
+            while IFS='|' read -r title raw_name mb bytes; do
+                [ -z "$title" ] && continue
+                [ -s "$CACHE_DIR/previews/${title}.png" ] && continue
+                [ -f "$CACHE_DIR/previews/${title}.png.none" ] && continue
+
+                if [ -s "${target_dir}/Imgs/${title}.png" ]; then
+                    # Already downloaded and has its own cover on the SD card - reuse it
+                    # instead of fetching it again from the network.
+                    cp "${target_dir}/Imgs/${title}.png" "$CACHE_DIR/previews/${title}.png" 2>/dev/null
+                    continue
+                fi
+
+                queue="${queue}${title}|${libretro_sys}
+"
+            done < "$list_file"
+
+            [ -n "$queue" ] && printf '%s' "$queue" >> "$CACHE_DIR/prefetch_covers.txt"
+        done < "$ARCHIVES_FILE"
+
+        rm -f /tmp/scan_active
+    ) &
+    local worker_pid=$!
+
+    (
+        while [ -f /tmp/scan_active ]; do
+            k=$(./bin/getkey)
+            if [ "$k" = "B" ]; then
+                touch /tmp/scan_cancel
+                break
+            fi
+        done
+    ) &
+    local key_pid=$!
+
+    while [ -f /tmp/scan_active ]; do
+        local progress=$(cat "$CACHE_DIR/scan_progress.txt" 2>/dev/null)
+        local repo_num=$(echo "$progress" | cut -d'|' -f1)
+        local repo_name=$(echo "$progress" | cut -d'|' -f2 | cut -c 1-24)
+        [ -z "$repo_num" ] && repo_num=0
+
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Scanning [$repo_num/$total_repos]: ${repo_name}\nART:NULL\nFOOTER:B/ Cancel\n"
+        render_ui
+        sleep 0.2
+    done
+
+    kill -9 $key_pid 2>/dev/null
+    local was_cancelled=0
+    [ -f /tmp/scan_cancel ] && was_cancelled=1
+    rm -f /tmp/scan_active /tmp/scan_cancel
+
+    if [ "$was_cancelled" -eq 1 ]; then
+        play_sound "back"
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Scan Cancelled!\n"
+        render_ui
+        sleep 1.5
+        STATE="MAIN_MENU"
+    elif [ -s "$CACHE_DIR/prefetch_covers.txt" ]; then
+        sort -u "$CACHE_DIR/prefetch_covers.txt" -o "$CACHE_DIR/prefetch_covers.txt"
+        STATE="CONFIRM_PREFETCH_COVERS"
+    else
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:All previews already cached!\n"
+        render_ui
+        sleep 2
+        STATE="MAIN_MENU"
+    fi
+    UI_RENDER_NEEDED=1
+}
+
+state_confirm_prefetch_covers() {
+    local total_items=$(wc -l < "$CACHE_DIR/prefetch_covers.txt")
+    [ "$total_items" -le 0 ] && total_items=1
+
+    if [ "$UI_RENDER_NEEDED" -eq 1 ]; then
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Found $total_items Previews to Fetch\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}FOOTER:A/ Start Download   B/ Cancel\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}ART:NULL\n"
+        render_ui
+    fi
+
+    get_key || return
+
+    case "$KEY" in
+        A)
+            play_sound "change"
+            STATE="DO_PREFETCH_COVERS"
+            UI_RENDER_NEEDED=1
+            ;;
+        B)
+            play_sound "back"
+            STATE="MAIN_MENU"
+            UI_RENDER_NEEDED=1
+            ;;
+    esac
+}
+
+state_do_prefetch_covers() {
+    local total_items=$(wc -l < "$CACHE_DIR/prefetch_covers.txt")
+    [ "$total_items" -le 0 ] && total_items=1
+    mkdir -p "$CACHE_DIR/previews"
+
+    rm -f /tmp/prefetch_active /tmp/prefetch_cancel
+    touch /tmp/prefetch_active
+    > "$CACHE_DIR/prefetch_history.txt"
+    echo 0 > "$CACHE_DIR/prefetch_progress.txt"
+
+    (
+        local current_item=0
+        local pids=""
+        while read -r line; do
+            [ -f /tmp/prefetch_cancel ] && break
+            current_item=$((current_item + 1))
+            local base_name=$(echo "$line" | cut -d'|' -f1)
+            local libretro_sys=$(echo "$line" | cut -d'|' -f2)
+
+            sed -i "1i$base_name" "$CACHE_DIR/prefetch_history.txt"
+            echo "$current_item" > "$CACHE_DIR/prefetch_progress.txt"
+
+            fetch_libretro_art_preview "$libretro_sys" "$base_name" "$CACHE_DIR/previews/${base_name}.png" &
+            pids="$pids $!"
+
+            while true; do
+                local running_jobs=0
+                local active_pids=""
+                for p in $pids; do
+                    if kill -0 $p 2>/dev/null; then
+                        running_jobs=$((running_jobs + 1))
+                        active_pids="$active_pids $p"
+                    fi
+                done
+                pids="$active_pids"
+
+                if [ "$running_jobs" -ge 4 ]; then
+                    sleep 0.1
+                else
+                    break
+                fi
+            done
+        done < "$CACHE_DIR/prefetch_covers.txt"
+
+        for p in $pids; do wait $p 2>/dev/null; done
+        rm -f /tmp/prefetch_active
+    ) &
+    local worker_pid=$!
+
+    (
+        while [ -f /tmp/prefetch_active ]; do
+            k=$(./bin/getkey)
+            if [ "$k" = "B" ]; then
+                touch /tmp/prefetch_cancel
+                break
+            fi
+        done
+    ) &
+    local key_pid=$!
+    local was_cancelled=0
+
+    while [ -f /tmp/prefetch_active ]; do
+        local current_item=$(cat "$CACHE_DIR/prefetch_progress.txt" 2>/dev/null)
+        [ -z "$current_item" ] && current_item=0
+        local pct=$(( (current_item * 100) / total_items ))
+
+        build_theme
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Fetching Previews $current_item of $total_items\n"
+        UI_FRAME_BUF="${UI_FRAME_BUF}HIGHLIGHT:-1\nPROGRESS:$pct\nART:NULL\nFOOTER:B/ Cancel\n"
+
+        local history=$(awk -v s=1 -v e=8 'NR>=s && NR<=e { print substr($0, 1, 28) }' "$CACHE_DIR/prefetch_history.txt" 2>/dev/null)
+        while read -r hist_line; do
+            [ -n "$hist_line" ] && UI_FRAME_BUF="${UI_FRAME_BUF}ITEM:${hist_line}\n"
+        done <<EOF
+$history
+EOF
+        render_ui
+
+        if [ -f /tmp/prefetch_cancel ]; then
+            play_sound "back"
+            kill -9 $worker_pid 2>/dev/null
+            was_cancelled=1
+            break
+        fi
+
+        sleep 0.2
+    done
+
+    kill -9 $key_pid 2>/dev/null
+    rm -f /tmp/prefetch_active /tmp/prefetch_cancel
+
+    build_theme
+    if [ "$was_cancelled" -eq 1 ]; then
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Preview Prefetch Cancelled!\n"
+    else
+        play_sound "confirm"
+        UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:Preview Prefetch Finished!\nPROGRESS:100\n"
+    fi
+    render_ui
+    sleep 1.5
+
+    STATE="MAIN_MENU"
+    UI_RENDER_NEEDED=1
+}
+
 # ==========================================
 # 7. BOOT SEQUENCE
 # ==========================================
@@ -2015,7 +2857,7 @@ while read -r fld; do
 done < "$CACHE_DIR/local_consoles.cache"
 
 build_theme
-UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:System Ready\nITEM:Installed ROMs: $total_roms\nITEM:Systems Found: $total_sys\nITEM:Cache Status: Healthy\nITEM:\nITEM:Made by pluscloud\nART:NULL\nHIGHLIGHT:-1\n"
+UI_FRAME_BUF="${UI_FRAME_BUF}STATUS:System Ready\nITEM:Installed ROMs: $total_roms\nITEM:Systems Found: $total_sys\nITEM:Cache Status: Healthy\nITEM:\nITEM:Made by pluscloud (and updated by brenonsc :p)\nART:NULL\nHIGHLIGHT:-1\n"
 render_ui
 sleep 1.5
 
@@ -2036,16 +2878,22 @@ do
         INST_GAMES) state_inst_games ;;
         FAVORITES) state_favorites ;;
         SETTINGS) state_settings ;;
+        SELECT_PREVIEW_REPO) state_select_preview_repo ;;
+        CONFIRM_DELETE_PREVIEWS) state_confirm_delete_previews ;;
         CONFIRM_SINGLE_SCRAPE) state_confirm_single_scrape ;;
         CONFIRM_DELETE) state_confirm_delete ;;
         SEARCH_GAMES) state_search_games ;;
         RECENT_DOWNLOADS) state_recent_downloads ;;
         MANAGE_REPOS) state_manage_repos ;;
+        SELECT_REPO_FOLDER) state_select_repo_folder ;;
         OSK_INPUT) state_osk_input ;;
         VALIDATE_REPO) state_validate_repo ;;
         SCRAPE_ART) state_scrape_art ;;
         CONFIRM_SCRAPE) state_confirm_scrape ;;
         DO_SCRAPE) state_do_scrape ;;
+        PREFETCH_COVERS_SCAN) state_prefetch_covers_scan ;;
+        CONFIRM_PREFETCH_COVERS) state_confirm_prefetch_covers ;;
+        DO_PREFETCH_COVERS) state_do_prefetch_covers ;;
         *) STATE="MAIN_MENU"; UI_RENDER_NEEDED=1 ;;
     esac
 done
