@@ -2,7 +2,7 @@
   <img width="96" height="96" alt="RomManager icon" src="RomManager/icon.png" />
 </p>
 
-<h1 align="center">RomManager 2.0</h1>
+<h1 align="center">RomManager 2.1</h1>
 
 <p align="center"><b>A ROM downloader and ROM manager for the Miyoo Mini and Miyoo Mini Plus, running on OnionOS.</b></p>
 
