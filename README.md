@@ -4,9 +4,9 @@
 
 <h1 align="center">RomManager 2.0</h1>
 
-<p align="center"><b>A game library and downloader for the Miyoo Mini and Mini Plus, running on OnionOS.</b></p>
+<p align="center"><b>A ROM downloader and ROM manager for the Miyoo Mini and Miyoo Mini Plus, running on OnionOS.</b></p>
 
-RomManager lets you browse your own game sources - archive.org items, web folders, or an FTP server on your PC - download your games over Wi-Fi with their box art, and play them, all on the handheld. No PC, no taking the SD card out.
+RomManager is an on-device ROM downloader for the Miyoo Mini: browse your own game sources - archive.org items, web folders, or an FTP server on your PC - download your games over Wi-Fi with their box art, and play them, all on the handheld. No PC, no taking the SD card out.
 
 It's also proof that a handheld app can feel smooth and polished on a small chip if it's built right. Everything animates, and when nothing moves the app uses no CPU at all, so the battery lasts and the device stays cool.
 
