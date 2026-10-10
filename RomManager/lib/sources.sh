@@ -804,21 +804,27 @@ source_games() {
 # Builds a console's game list from every repo that has it, as
 # "title|url|source|size" lines sorted by title. $3: status file for errors.
 # Sources that fail are skipped as long as at least one works.
+# The finished list is kept with a note of what it was made from ($out.sig: the repos
+# and when each one's file list was read). Opening the console again with nothing
+# changed reuses it, instead of going through every file in the repos again (slow for
+# repos with thousands of games).
 build_console_games() {
     local console="$1" out="$2" status="$3" force="$4"
-    local tmp="$out.tmp" any_ok=0 src_status="$CACHE_DIR/.src_status" c src fmt
+    local tmp="$out.tmp" any_ok=0 src_status="$CACHE_DIR/.src_status" c src fmt map
+    local ok_list="$CACHE_DIR/.repos_ok" sig="$RM_VERSION"
     : > "$tmp"
+    : > "$ok_list"
     rm -f "$status"
 
+    # Read (or refresh) the file list of every repo that has this console
     repos_list > "$CACHE_DIR/.repos_now"
     while IFS='|' read -r c src fmt; do
-        local folder_prefix=""
+        map=""
         if [ "$c" = "*" ]; then
             map=$(pack_map_file "$src")
             [ -f "$map" ] || continue
             # A pack can map several folders to the same console
-            folder_prefix=$(awk -F'|' -v c="$console" '$2 == c { print $1 }' "$map")
-            [ -z "$folder_prefix" ] && continue
+            awk -F'|' -v c="$console" '$2 == c { f = 1; exit } END { exit !f }' "$map" || continue
         elif [ "$c" != "$console" ]; then
             continue
         fi
@@ -828,14 +834,31 @@ build_console_games() {
             continue
         fi
         any_ok=1
-        source_games "$console" "$src" "$fmt" "$folder_prefix" >> "$tmp"
+        echo "$c|$src|$fmt" >> "$ok_list"
+        sig="$sig;$c|$src|$fmt|$(stat -c %Y "$(source_index_file "$src")" 2>/dev/null)"
+        [ -n "$map" ] && sig="$sig|$(stat -c %Y "$map" 2>/dev/null)"
     done < "$CACHE_DIR/.repos_now"
     rm -f "$CACHE_DIR/.repos_now" "$src_status"
+
+    if [ "$force" != "1" ] && [ "$any_ok" -eq 1 ] && [ -s "$out" ] && [ -f "$out.sig" ] && \
+        [ "$(cat "$out.sig")" = "$sig" ]; then
+        rm -f "$tmp" "$ok_list"
+        return 0
+    fi
+    rm -f "$out.sig"
+
+    while IFS='|' read -r c src fmt; do
+        local folder_prefix=""
+        [ "$c" = "*" ] && folder_prefix=$(awk -F'|' -v c="$console" '$2 == c { print $1 }' "$(pack_map_file "$src")")
+        source_games "$console" "$src" "$fmt" "$folder_prefix" >> "$tmp"
+    done < "$ok_list"
+    rm -f "$ok_list"
 
     # Same game (title + file type) in several repos: keep the first
     awk -F'|' '{ ext = $2; sub(/^.*\./, "", ext); key = tolower($1 "." ext) } !seen[key]++' "$tmp" \
         | sort -f -t'|' -k1,1 > "$out"
     rm -f "$tmp"
+    [ -s "$out" ] && printf '%s\n' "$sig" > "$out.sig"
 
     if [ ! -s "$out" ]; then
         [ "$any_ok" -eq 1 ] && echo "empty" > "$status"

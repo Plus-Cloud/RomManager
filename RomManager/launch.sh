@@ -18,6 +18,12 @@ if [ -z "$RM_SUPERVISED" ]; then
         rc=$?
         killall rmui rmkey rmaudio ffplay 2>/dev/null
         [ "$rc" -eq 0 ] && exit 0
+        # 75: an update was just installed (lib/update.sh) - start the new version
+        if [ "$rc" -eq 75 ]; then
+            echo "=== $(date) updated, restarting" >> "$RM_LOG"
+            restarts=0
+            continue
+        fi
         echo "=== $(date) exited with code $rc on screen: $(cat /tmp/rm_state 2>/dev/null)" >> "$RM_LOG"
         # 137/143: killed by the system (power off, low battery) - don't come back
         case "$rc" in 137|143) exit "$rc" ;; esac
@@ -32,7 +38,7 @@ fi
 export PATH="./bin:/usr/bin:/bin:/sbin:/usr/sbin:$PATH"
 export LD_LIBRARY_PATH="./libs:./bin:/usr/lib:/customer/lib:/config/lib:/lib:$LD_LIBRARY_PATH"
 
-RM_VERSION="2.0"
+RM_VERSION="2.1"
 UI_FRAME="/tmp/ui_frame.txt"
 # rmui is the new renderer; the original ui_renderer stays as a fallback.
 UI_RENDERER="./bin/rmui"
@@ -41,7 +47,7 @@ UI_RENDERER="./bin/rmui"
 # The old renderer can't, so it gets them cut to 28 characters.
 ITEM_CHARS=200
 [ "$UI_RENDERER" = "./bin/ui_renderer" ] && ITEM_CHARS=28
-chmod +x ./bin/rmui ./bin/ui_renderer ./bin/rmkey ./bin/rmaudio ./bin/getkey 2>/dev/null
+chmod +x ./bin/rmui ./bin/ui_renderer ./bin/rmkey ./bin/rmls ./bin/rmaudio ./bin/getkey 2>/dev/null
 RMUI_FIFO="/tmp/rmui.fifo"
 RMUI_PID=""
 
@@ -89,6 +95,8 @@ MOTION=on          # on | off (animations)
 LAUNCHER=1         # 1: games started here (and Onion's game switcher) come back here
 SHOW_PERF=0        # 1: frames-per-second / CPU readout (settings.ini only)
 DISCLAIMER_SEEN=0
+AUTO_UPDATE=1      # 1: get new versions from GitHub by itself (lib/update.sh)
+UPDATE_SKIP=""     # a version the player chose to skip
 
 [ -f "$SETTINGS_FILE" ] && . "./$SETTINGS_FILE" # (with ./ - a bare name is looked for in PATH)
 
@@ -474,6 +482,8 @@ save_settings() {
     echo "LAUNCHER=$LAUNCHER" >> "$SETTINGS_FILE"
     echo "SHOW_PERF=$SHOW_PERF" >> "$SETTINGS_FILE"
     echo "DISCLAIMER_SEEN=$DISCLAIMER_SEEN" >> "$SETTINGS_FILE"
+    echo "AUTO_UPDATE=$AUTO_UPDATE" >> "$SETTINGS_FILE"
+    echo "UPDATE_SKIP=$UPDATE_SKIP" >> "$SETTINGS_FILE"
     theme_settings
 
     if [ "$BGM_ENABLED" -eq 0 ]; then stop_bgm; else start_bgm; fi
@@ -765,8 +775,14 @@ refresh_onion_list() {
     rm -f "$dir/${1}_cache6.db" "$dir/${1}_cache2.db" "$dir/miyoocache.bin"
 }
 
+# The games in a ROM folder, sorted. rmls reads the folder once; "ls -p" looked up
+# every file, which on the SD card took seconds for a folder of thousands of games.
 list_rom_folder() {
-    ls -1p "$ROMS_DIR/$1" 2>/dev/null | grep -ivE "$ROM_IGNORE"
+    if [ -x ./bin/rmls ]; then
+        ./bin/rmls list "$ROMS_DIR/$1" 2>/dev/null
+    else
+        ls -1p "$ROMS_DIR/$1" 2>/dev/null | grep -ivE "$ROM_IGNORE"
+    fi
 }
 
 # Filters the full list into the current one. Every space-separated word must appear
@@ -1128,82 +1144,88 @@ get_auto_extensions() {
 }
 
 get_console_name() {
+    console_name_var "$1"
+    echo "$CONSOLE_NAME"
+}
+
+# Sets CONSOLE_NAME without starting a subshell (get_console_name prints it)
+console_name_var() {
     case "$1" in
-        "GBA") echo "Game Boy Advance" ;;
-        "PS") echo "PlayStation 1" ;;
-        "FC") echo "Nintendo NES" ;;
-        "SFC") echo "Super Nintendo" ;;
-        "SATELLAVIEW") echo "Satellaview" ;;
-        "GB") echo "Game Boy" ;;
-        "GBC") echo "Game Boy Color" ;;
-        "MD") echo "Sega Genesis" ;;
-        "GG") echo "Sega Game Gear" ;;
-        "SMS") echo "Sega Master System" ;;
-        "PCE") echo "TurboGrafx-16" ;;
-        "NEOGEO") echo "Neo Geo" ;;
-        "ARCADE") echo "Arcade" ;;
-        "NGP") echo "Neo Geo Pocket" ;;
-        "NGPC") echo "Neo Geo Pocket Color" ;;
-        "WS") echo "WonderSwan" ;;
-        "WSC") echo "WonderSwan Color" ;;
-        "SNES") echo "Super Nintendo" ;;
-        "NES") echo "Nintendo NES" ;;
-        "ATARI2600") echo "Atari 2600" ;;
-        "ATARI7800") echo "Atari 7800" ;;
-        "ATARILYNX") echo "Atari Lynx" ;;
-        "VB") echo "Virtual Boy" ;;
-        "SEGACD") echo "Sega CD" ;;
-        "FDS") echo "Famicom Disk System" ;;
-        "POKEFAMI") echo "Pokemon Mini" ;;
-        "NDS") echo "Nintendo DS" ;;
-        "N64") echo "Nintendo 64" ;;
-        "CPS1") echo "Capcom Play System 1" ;;
-        "CPS2") echo "Capcom Play System 2" ;;
-        "CPS3") echo "Capcom Play System 3" ;;
-        "DOS") echo "MS-DOS" ;;
-        "PORTS") echo "Ports" ;;
-        "GW") echo "Game & Watch" ;;
-        "MSX") echo "MSX" ;;
-        "MSX2") echo "MSX2" ;;
-        "PICO") echo "Pico-8" ;;
-        "SGB") echo "Super Game Boy" ;;
-        "FIFTYTWO00") echo "Atari 5200" ;;
-        "AMIGA") echo "Commodore Amiga" ;;
-        "C64") echo "Commodore 64" ;;
-        "NEOCD") echo "Neo Geo CD" ;;
-        "SCUMMVM") echo "ScummVM" ;;
-        "PSP") echo "PlayStation Portable" ;;
-        "DC") echo "Sega Dreamcast" ;;
-        "32X") echo "Sega 32X" ;;
-        "PCFX") echo "PC-FX" ;;
-        "TIC80") echo "TIC-80" ;;
-        "VECTREX") echo "Vectrex" ;;
+        "GBA") CONSOLE_NAME="Game Boy Advance" ;;
+        "PS") CONSOLE_NAME="PlayStation 1" ;;
+        "FC") CONSOLE_NAME="Nintendo NES" ;;
+        "SFC") CONSOLE_NAME="Super Nintendo" ;;
+        "SATELLAVIEW") CONSOLE_NAME="Satellaview" ;;
+        "GB") CONSOLE_NAME="Game Boy" ;;
+        "GBC") CONSOLE_NAME="Game Boy Color" ;;
+        "MD") CONSOLE_NAME="Sega Genesis" ;;
+        "GG") CONSOLE_NAME="Sega Game Gear" ;;
+        "SMS") CONSOLE_NAME="Sega Master System" ;;
+        "PCE") CONSOLE_NAME="TurboGrafx-16" ;;
+        "NEOGEO") CONSOLE_NAME="Neo Geo" ;;
+        "ARCADE") CONSOLE_NAME="Arcade" ;;
+        "NGP") CONSOLE_NAME="Neo Geo Pocket" ;;
+        "NGPC") CONSOLE_NAME="Neo Geo Pocket Color" ;;
+        "WS") CONSOLE_NAME="WonderSwan" ;;
+        "WSC") CONSOLE_NAME="WonderSwan Color" ;;
+        "SNES") CONSOLE_NAME="Super Nintendo" ;;
+        "NES") CONSOLE_NAME="Nintendo NES" ;;
+        "ATARI2600") CONSOLE_NAME="Atari 2600" ;;
+        "ATARI7800") CONSOLE_NAME="Atari 7800" ;;
+        "ATARILYNX") CONSOLE_NAME="Atari Lynx" ;;
+        "VB") CONSOLE_NAME="Virtual Boy" ;;
+        "SEGACD") CONSOLE_NAME="Sega CD" ;;
+        "FDS") CONSOLE_NAME="Famicom Disk System" ;;
+        "POKEFAMI") CONSOLE_NAME="Pokemon Mini" ;;
+        "NDS") CONSOLE_NAME="Nintendo DS" ;;
+        "N64") CONSOLE_NAME="Nintendo 64" ;;
+        "CPS1") CONSOLE_NAME="Capcom Play System 1" ;;
+        "CPS2") CONSOLE_NAME="Capcom Play System 2" ;;
+        "CPS3") CONSOLE_NAME="Capcom Play System 3" ;;
+        "DOS") CONSOLE_NAME="MS-DOS" ;;
+        "PORTS") CONSOLE_NAME="Ports" ;;
+        "GW") CONSOLE_NAME="Game & Watch" ;;
+        "MSX") CONSOLE_NAME="MSX" ;;
+        "MSX2") CONSOLE_NAME="MSX2" ;;
+        "PICO") CONSOLE_NAME="Pico-8" ;;
+        "SGB") CONSOLE_NAME="Super Game Boy" ;;
+        "FIFTYTWO00") CONSOLE_NAME="Atari 5200" ;;
+        "AMIGA") CONSOLE_NAME="Commodore Amiga" ;;
+        "C64") CONSOLE_NAME="Commodore 64" ;;
+        "NEOCD") CONSOLE_NAME="Neo Geo CD" ;;
+        "SCUMMVM") CONSOLE_NAME="ScummVM" ;;
+        "PSP") CONSOLE_NAME="PlayStation Portable" ;;
+        "DC") CONSOLE_NAME="Sega Dreamcast" ;;
+        "32X") CONSOLE_NAME="Sega 32X" ;;
+        "PCFX") CONSOLE_NAME="PC-FX" ;;
+        "TIC80") CONSOLE_NAME="TIC-80" ;;
+        "VECTREX") CONSOLE_NAME="Vectrex" ;;
         # Onion's own folder names
-        "MS") echo "Sega Master System" ;;
-        "ATARI") echo "Atari 2600" ;;
-        "SEVENTYEIGHTHUNDRED") echo "Atari 7800" ;;
-        "FIFTYTWOHUNDRED") echo "Atari 5200" ;;
-        "LYNX") echo "Atari Lynx" ;;
-        "THIRTYTWOX") echo "Sega 32X" ;;
-        "POKE") echo "Pokemon Mini" ;;
-        "COMMODORE") echo "Commodore 64" ;;
-        "TIC") echo "TIC-80" ;;
-        "PCECD") echo "TurboGrafx CD" ;;
-        "COLECO") echo "ColecoVision" ;;
-        "INTELLIVISION") echo "Intellivision" ;;
-        "SEGASGONE") echo "Sega SG-1000" ;;
-        "SGFX") echo "SuperGrafx" ;;
-        "SUFAMI") echo "Sufami Turbo" ;;
-        "SUPERVISION") echo "Supervision" ;;
-        "VIC20") echo "Commodore VIC-20" ;;
-        "VIDEOPAC") echo "Videopac+" ;;
-        "ODYSSEY") echo "Odyssey 2" ;;
-        "ZXS") echo "ZX Spectrum" ;;
-        "CPC") echo "Amstrad CPC" ;;
-        "MEGADUCK") echo "Mega Duck" ;;
-        "FAIRCHILD") echo "Channel F" ;;
-        "ATARIST") echo "Atari ST" ;;
-        *) echo "$1" ;;
+        "MS") CONSOLE_NAME="Sega Master System" ;;
+        "ATARI") CONSOLE_NAME="Atari 2600" ;;
+        "SEVENTYEIGHTHUNDRED") CONSOLE_NAME="Atari 7800" ;;
+        "FIFTYTWOHUNDRED") CONSOLE_NAME="Atari 5200" ;;
+        "LYNX") CONSOLE_NAME="Atari Lynx" ;;
+        "THIRTYTWOX") CONSOLE_NAME="Sega 32X" ;;
+        "POKE") CONSOLE_NAME="Pokemon Mini" ;;
+        "COMMODORE") CONSOLE_NAME="Commodore 64" ;;
+        "TIC") CONSOLE_NAME="TIC-80" ;;
+        "PCECD") CONSOLE_NAME="TurboGrafx CD" ;;
+        "COLECO") CONSOLE_NAME="ColecoVision" ;;
+        "INTELLIVISION") CONSOLE_NAME="Intellivision" ;;
+        "SEGASGONE") CONSOLE_NAME="Sega SG-1000" ;;
+        "SGFX") CONSOLE_NAME="SuperGrafx" ;;
+        "SUFAMI") CONSOLE_NAME="Sufami Turbo" ;;
+        "SUPERVISION") CONSOLE_NAME="Supervision" ;;
+        "VIC20") CONSOLE_NAME="Commodore VIC-20" ;;
+        "VIDEOPAC") CONSOLE_NAME="Videopac+" ;;
+        "ODYSSEY") CONSOLE_NAME="Odyssey 2" ;;
+        "ZXS") CONSOLE_NAME="ZX Spectrum" ;;
+        "CPC") CONSOLE_NAME="Amstrad CPC" ;;
+        "MEGADUCK") CONSOLE_NAME="Mega Duck" ;;
+        "FAIRCHILD") CONSOLE_NAME="Channel F" ;;
+        "ATARIST") CONSOLE_NAME="Atari ST" ;;
+        *) CONSOLE_NAME="$1" ;;
     esac
 }
 
@@ -1337,19 +1359,27 @@ refresh_previews_have_list() {
 update_local_consoles() {
     [ -f "$CACHE_DIR/local_consoles.cache" ] && return
     
-    > "$CACHE_DIR/local_consoles.cache"
-    for dir in /mnt/SDCARD/Roms/*; do
-        [ -d "$dir" ] || continue
-        local folder_name="${dir##*/}"
-        local count=$(ls -1p "$dir" 2>/dev/null | grep -ivE -c "$ROM_IGNORE")
-        if [ "$count" -gt 0 ]; then
-            local pretty_name=$(get_console_name "$folder_name")
-            echo "${folder_name}|${count}|${pretty_name}" >> "$CACHE_DIR/local_consoles.cache"
-        fi
-    done
-    if [ -s "$CACHE_DIR/local_consoles.cache" ]; then
-        sort -u "$CACHE_DIR/local_consoles.cache" -o "$CACHE_DIR/local_consoles.cache"
+    local out="$CACHE_DIR/local_consoles.cache" folder_name count
+    # One rmls run counts every folder (this used to start three programs for each
+    # of the ~70 Roms folders, and list every file of each one)
+    if [ -x ./bin/rmls ]; then
+        ./bin/rmls count "$ROMS_DIR" 2>/dev/null > "$out.tmp"
+    else
+        > "$out.tmp"
+        for dir in "$ROMS_DIR"/*; do
+            [ -d "$dir" ] || continue
+            count=$(ls -1p "$dir" 2>/dev/null | grep -ivE -c "$ROM_IGNORE")
+            [ "$count" -gt 0 ] && echo "${dir##*/}|$count" >> "$out.tmp"
+        done
     fi
+    > "$out"
+    while IFS='|' read -r folder_name count; do
+        [ -n "$folder_name" ] || continue
+        console_name_var "$folder_name"
+        echo "${folder_name}|${count}|${CONSOLE_NAME}" >> "$out"
+    done < "$out.tmp"
+    rm -f "$out.tmp"
+    [ -s "$out" ] && sort -u "$out" -o "$out"
 }
 
 force_update_local_consoles() {
@@ -1501,7 +1531,7 @@ state_main_menu() {
 
 # Settings rows, in order. Value rows change with left/right (or A); "->" rows open a
 # tool. The volume rows show bars.
-SETTINGS_ROWS="music sfx home motion start launcher items scrape cache login tool_scrape tool_prefetch previews clear rebuild credits"
+SETTINGS_ROWS="music sfx home motion start launcher items scrape cache login tool_scrape tool_prefetch previews clear rebuild autoupdate update credits"
 
 settings_row_id() {
     echo "$SETTINGS_ROWS" | cut -d' ' -f$(($1 + 1))
@@ -1562,6 +1592,10 @@ settings_change() {
             play_sound "change"
             AUTO_SCRAPE=$((1 - AUTO_SCRAPE))
             ;;
+        autoupdate)
+            play_sound "change"
+            AUTO_UPDATE=$((1 - AUTO_UPDATE))
+            ;;
         cache)
             play_sound "change"
             if [ "$2" -gt 0 ]; then
@@ -1590,6 +1624,9 @@ state_settings() {
         local launcher_txt="ON"; [ "$LAUNCHER" = "1" ] || launcher_txt="OFF"
         local login_txt="-> Log in to archive.org"
         [ -n "$IA_USER" ] && login_txt="archive.org: $(echo "$IA_USER" | cut -c 1-20) (log out)"
+        local autoupd_txt="ON"; [ "$AUTO_UPDATE" = "1" ] || autoupd_txt="OFF"
+        local update_txt="-> Check for Updates"
+        update_pending && update_txt="-> Update to $UPD_VERSION"
         {
             echo "Music Volume  $(volume_bar "$BGM_VOLUME")"
             echo "Sound Effects  $(volume_bar "$SFX_VOLUME")"
@@ -1606,13 +1643,15 @@ state_settings() {
             echo "-> Manage Preview Cache"
             echo "-> Clear Repo Cache"
             echo "-> Rebuild Local Database"
+            echo "Auto Update  [$autoupd_txt]"
+            echo "$update_txt"
             echo "-> Credits & About"
         } > "$CACHE_DIR/settings_rows.list"
 
         local footer="A/ Open  B/ Save & Back"
         case "$row" in
             music|sfx) footer="<>/ Volume  B/ Save & Back" ;;
-            start|home|motion|launcher|items|scrape|cache) footer="<>/ Change  B/ Save & Back" ;;
+            start|home|motion|launcher|items|scrape|cache|autoupdate) footer="<>/ Change  B/ Save & Back" ;;
         esac
         # What the highlighted setting does
         local hint="Settings & Tools"
@@ -1632,6 +1671,8 @@ state_settings() {
             previews) hint="See and delete saved preview covers, by console" ;;
             clear) hint="Forget saved repo game lists - they're read again" ;;
             rebuild) hint="Count the games on your SD card again" ;;
+            autoupdate) hint="Get new versions from GitHub by itself (installed when it starts)" ;;
+            update) hint="You have version $RM_VERSION - get the newest from GitHub" ;;
             credits) hint="Who made RomManager" ;;
         esac
         draw_simple_list "$CACHE_DIR/settings_rows.list" "$SET_INDEX" "$hint" "$footer"
@@ -1652,7 +1693,12 @@ state_settings() {
         A)
             case "$row" in
                 music|sfx) ;;
-                start|home|motion|launcher|items|scrape|cache) settings_change "$row" 1 ;;
+                start|home|motion|launcher|items|scrape|cache|autoupdate) settings_change "$row" 1 ;;
+                update)
+                    play_sound "change"
+                    save_settings
+                    if update_pending; then update_flow; else update_flow check; fi
+                    ;;
                 login)
                     play_sound "change"
                     if [ -n "$IA_USER" ]; then
@@ -5269,6 +5315,8 @@ EOF
 
 # Repo handling lives in lib/sources.sh; first launch converts the old archives.txt
 . ./lib/sources.sh
+# Updates from GitHub
+. ./lib/update.sh
 theme_settings
 
 # The boot screen: logo, a loading bar that follows the real steps, what was found,
@@ -5311,6 +5359,19 @@ start_renderer
 start_input
 boot_frame "Starting up..." 5
 
+# An update downloaded in the background last time: install it and start the new
+# version (not when coming back from a game - that waits for the next start)
+if [ "$RETURNING" != "1" ] && [ -s "$UPDATE_DIR/ready" ]; then
+    boot_frame "Installing update..." 10
+    if update_apply_staged; then
+        boot_frame "Updated - restarting..." 100
+        sleep 0.5
+        stop_renderer
+        stop_input
+        exit "$UPDATE_RESTART_CODE"
+    fi
+fi
+
 migrate_archives
 migrate_console_codes
 # Listing pages and covers left behind if the app was closed mid-task. Partial
@@ -5343,6 +5404,8 @@ free_txt=$(free_space_kb /mnt/SDCARD)
 case "$free_txt" in ''|*[!0-9]*) free_txt="" ;; *) free_txt="  ·  $(format_size $((free_txt * 1024))) free" ;; esac
 BOOT_INFO2="$HOME_REPOS repos  ·  $wifi_txt$free_txt"
 [ "$HOME_REPOS" = "1" ] && BOOT_INFO2="1 repo  ·  $wifi_txt$free_txt"
+# (in the background - a new version is downloaded and installed at the next start)
+update_auto_check
 
 boot_frame "Ready!" 100
 # (long enough to see the bar fill up)
@@ -5367,6 +5430,12 @@ fi
 
 # Downloads that didn't finish last time
 offer_resume_downloads
+
+# Just restarted after an update
+if [ -s "$CACHE_DIR/.just_updated" ]; then
+    toast ok "Updated to RomManager $RM_VERSION"
+    rm -f "$CACHE_DIR/.just_updated"
+fi
 
 UI_RENDER_NEEDED=1
 
