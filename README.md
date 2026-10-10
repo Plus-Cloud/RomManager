@@ -1,136 +1,154 @@
-# RomManager
-
-RomManager is a standalone terminal engine, asset scraper, and direct network harvester built specifically for the Miyoo Mini and Miyoo Mini Plus running OnionOS. Operating directly from your applications directory, it drops a sleek menu wrapper over your handheld, giving you the power to crawl public internet archives, download game files directly over Wi-Fi, and manage your local collection on the fly without ever pulling your SD card or connecting to a PC.
-
-Most scene tools out there are either bloated, depend on heavy runtime environments, or completely break when trying to match game titles with box art databases. RomManager fixes all of that. It runs on a lightweight, shell-driven graphics architecture to parse massive multi-thousand game lists with absolute zero menu lag, working natively with the screen display buffer.
-
 <p align="center">
-  <img width="640" height="480" alt="MainUI_001" src="https://github.com/user-attachments/assets/aca9bd1c-e3b0-4131-949b-d9c51f6cd6cd" />
+  <img width="96" height="96" alt="RomManager icon" src="RomManager/icon.png" />
 </p>
 
----
+<h1 align="center">RomManager 2.0</h1>
 
-## 🚀 Core Features
+<p align="center"><b>A game library and downloader for the Miyoo Mini and Mini Plus, running on OnionOS.</b></p>
 
-* **PC-Free Game Harvesting:** Link up to your Miyoo's local Wi-Fi to browse, stream, and download game packages from public internet archives directly to your system ROM directories.
-* **Universal Naming Translation Layer:** Built with a regex matching engine that cleans up titles for every single console database on the fly. It automatically strips out messy metadata distribution junk (like `[!]`, `[C]`, or bad bracket text) and converts single-letter region tags (like `(U)`, `(E)`, or `(J)`) into full standard words (`(USA)`, `(Europe)`, `(Japan)`). This ensures naming formats align perfectly with web artwork databases.
-* **Dynamic Art Scraping:** Built-in automated asset fetching. When you pull a new game down, the scraper instantly runs the translated title through external Libretro thumbnail servers to track down, grab, and map the correct cover art in real-time.
-* **Live Graphical Preview Canvas:** Features a localized display painter that grabs high-resolution box art from your console directories and pulls it right onto your screen. Whether you are checking local storage files or hovering over a remote download option, you get an instant visual preview of the actual game cover.
-* **Smooth D-Pad Scrolling:** Heavy CPU menu throttling is completely eliminated. The app locks down all system pathways, local files, and directory counts into clean static cache maps on boot. Scrolling through lists reads straight from these pre-built cache logs, meaning absolutely zero input delay on lower-power ARM chips.
-* **On-Screen Keyboard Search:** Tap `Select` inside any massive file menu to summon a responsive letter matrix screen, allowing you to instantly type out custom search query strings and filter down endless game sets to exactly what you want.
-* **Local Handheld Cleaning:** A dedicated local directory deck lets you inspect exactly what is on your system storage, run a focused art scrape on a single game with a missing cover, or permanently delete unwanted files and matching artwork to reclaim space instantly.
+RomManager lets you browse your own game sources - archive.org items, web folders, or an FTP server on your PC - download your games over Wi-Fi with their box art, and play them, all on the handheld. No PC, no taking the SD card out.
 
-### 🛠️ Secondary Mechanics
+It's also proof that a handheld app can feel smooth and polished on a small chip if it's built right. Everything animates, and when nothing moves the app uses no CPU at all, so the battery lasts and the device stays cool.
 
-* **Background Soundtrack Loop & Menu FX:** Integrated audio tracking handling background loops and sharp physical button audio feedback.
-* **Track Interruption Recovery:** The script saves live audio tracking coordinates to a state log (`/tmp/bgm_position`) when menu sound effects ring out. The background loop resumes from the exact second it left off instead of restarting the song from the beginning.
-* **Clean Suffix Extension Slicing:** Keeps the display menus completely clean by stripping raw file extensions (`.zip`, `.gbc`, `.chd`, `.7z`) across all folders before writing text lines to the display canvas.
-* **Cross-Platform Bookmarking:** A global cross-platform tracker file (`favorites.txt`) allows you to favorite your preferred game titles across completely different emulator paths for fast navigation.
+<p align="center">
+  <img width="400" alt="RomManager home screen" src="screenshots/02_home.png" />
+  <img width="400" alt="Your games in cover flow" src="screenshots/14_installed_covers.png" />
+</p>
 
----
+> ⚖️ **RomManager doesn't include, host or link to any games.** It only downloads from sources you add yourself. Only download games you own, and follow the copyright laws where you live.
+
+## ✨ Features
+
+### Looks and feel
+- **Home screen** of six big tiles (or a plain list, if you prefer), with live counts - and live progress while something downloads.
+- **Boot screen** with a loading bar that follows the real start-up, your library at a glance, and a tip.
+- **Slides, fades and pop-ups** between screens; notices slide in and go away by themselves, so nothing makes you wait.
+- **Cover flow** in every game and console list (press **R**): covers slide past with reflections, and the selected one floats gently.
+- **Its own icons** for consoles and menus, so RomManager looks the same whatever Onion theme you use.
+- **Animations can be turned off** in Settings.
+
+### Under the hood
+- A **screen engine written in C** for the Mini: double buffering (no tearing), NEON-accelerated drawing, and box art decoded on the second CPU core so scrolling never waits for it.
+- **No CPU used when idle** - the screen only redraws when something changes.
+- Separate small programs for the **buttons** (no missed or laggy presses) and the **sound** (music and button sounds mixed, so the music never pauses).
+- **Crash-safe:** problems are logged to `caches/rommanager.log` and RomManager restarts itself.
+
+### Your sources
+- Add **archive.org items, web folders or FTP folders**, and see every game they have for a console in one merged list, without duplicates.
+- **Multi-console packs:** add a whole collection at once; RomManager matches its folders (or per-console zips) to consoles and marks any the Mini can't run.
+- **Help while typing:** start an archive.org ID and a matching item is suggested.
+- **archive.org login** for items that need an account - only the login cookie is kept, never your password.
+
+### Downloading
+- **Background downloads:** pick a game and keep browsing. Queue as many as you like; **X** on the home screen opens the queue with speed, time left, retry and cancel.
+- **Resume:** downloads stopped by a game or a power-off carry on where they left off.
+- **Before you download:** the game's size and your free space, and a check mark on games you already have.
+- **Sort & Filter (Y):** A-Z or biggest first, one region, hide betas / demos / hacks, hide games you have.
+- **Box art** with every game, and disc games get their `.cue` too. Preview covers for games you haven't downloaded are fetched three at a time, nearest first, and stored small.
+
+### Playing
+- **A** plays any installed game, favorite or recent download. If its emulator is switched off in Onion, RomManager offers to turn it on.
+- **Default Launcher:** a game started from RomManager comes back to it when it ends - straight to the screen you left, no boot screen. **Menu** opens Onion's game switcher, and **B** there comes back too. Games you start show up in Onion's game switcher and Recents. Close RomManager and Onion is back to normal.
+
+### Your library
+- Search with the on-screen keyboard, **L2 / R2** to jump by letter, and every list remembers where you were.
+- Favorites across all consoles, and a Recent Downloads list.
+- Get box art for one game or every game missing it; delete a game together with its disc files and art.
 
 ## 📸 Screenshots
 
-<p align="center">
-  <img width="640" height="480" alt="RomManager_001" src="https://github.com/user-attachments/assets/9e896097-6467-4ab3-9656-23e792235b26" />
-  <br><br>
-  <img width="640" height="480" alt="RomManager_004" src="https://github.com/user-attachments/assets/17dd250f-a1c6-48ba-ac48-683eb14d1ac8" />
-</p>
+| | |
+| :---: | :---: |
+| <img width="380" alt="Boot screen" src="screenshots/01_boot.png" /><br><sub>Boot screen</sub> | <img width="380" alt="Consoles in cover flow" src="screenshots/03_consoles.png" /><br><sub>Consoles in cover flow, with RomManager's own icons</sub> |
+| <img width="380" alt="A source's game list" src="screenshots/05_download_list.png" /><br><sub>A source's games - check marks on the ones you have</sub> | <img width="380" alt="Download pop-up" src="screenshots/06_download_confirm.png" /><br><sub>Size and free space before you download</sub> |
+| <img width="380" alt="Download queue" src="screenshots/08_download_queue.png" /><br><sub>The download queue, running in the background</sub> | <img width="380" alt="Settings" src="screenshots/10_settings_launcher.png" /><br><sub>Every setting explained on the status line</sub> |
 
----
-
-## 📁 Directory & Architecture Map
-
-For deployment inside OnionOS, the application folder structure looks like this:
-
-```bash
-/mnt/SDCARD/App/RomManager/
-├── bin/                    # Helper binaries mapping controls and screen text painting
-│   ├── getkey              # Hardware button tracker
-│   ├── ui_renderer         # Core canvas display buffer compiler
-│   └── show                # Canvas paint rendering utility
-├── libs/                   # Shared execution libraries (.so dependencies)
-├── sounds/                 # Wave assets for operational audio engines and tracking loops
-├── ui/                     # Device font sheets and terminal wallpaper art assets
-├── caches/                 # Pre-built system maps, search logs, and preview graphics
-├── archives.txt            # System configuration database linking local paths to Repo IDs
-└── launch.sh               # Main application launch execution script 
-
-```
-
----
-
-## 🗺️ Operating the Repository Menu
-
-> ⚠️ **Disclaimer:** RomManager does not host, share, or bundle any copyrighted digital files or game data. Every network pass is driven entirely by the database targets you link inside the app.
-
-Selecting **Manage Repositories** from the main menu brings up your global backend deck. This screen lists every system folder on your SD card alongside its active internet repository target. If a system hasn't been set up yet, it will display a blank `ADD REPO` tag.
-
----
-
-* **Select the Platform:** Navigate to your desired console category and press **Button A** to open the digital keyboard.
-* **Enter the Unique Identifier:** Input the precise, case-sensitive ID of the online repository mapped to that specific console.
-* *Example:* If the target web address for your console's files is `https://archive.org/details/homebrew-console-pack`, the exact string you need to enter is `homebrew-console-pack`.
-
-
-* **Commit the Changes:** Press the **Start** button to save your input.
-
-Once saved, the system automatically initiates a background handshake to ping the remote host and confirm the directory structure for that specific console is valid.
-
-Upon successful verification, the repository links permanently to your system. Selecting that specific console from the primary download interface will now automatically generate and display its current file directory.
-
-Internet Archive data can change or update. If you notice a repo has added new games or changed its layout, navigate back to **Manage Repositories**, highlight that system, and press **Button Y**.
-
-This completely purges the local database list for that specific console without wiping any of your other systems. The next time you open that console's download section, the engine will fetch a completely fresh, updated file map from the server.
-
----
+<p align="center"><sub>The games shown are homebrew, with box art from the Libretro thumbnails project; game counts and sources are sample data.</sub></p>
 
 ## 💾 Installation
 
-1. Download the `RomManager` zip archive from the releases tab on GitHub.
-2. Open the zip file, grab the inner `RomManager` folder, and drag it directly into the App directory on your Miyoo's SD card:
+1. Download the latest `RomManager` zip from the **Releases** page.
+2. Copy the `RomManager` folder inside it to `/App/` on your SD card, so you have `/App/RomManager/launch.sh`.
+3. Put the card back in, turn on Wi-Fi, and open **RomManager** from Onion's Apps.
+
+**Updating from 1.x:** copy the new `RomManager` folder over the old one - your repos, favorites and settings are kept.
+
+**Devices:** Miyoo Mini and Mini Plus on OnionOS. The screen adapts to the Mini v4 / Flip resolution, but those haven't been tested yet - reports are welcome.
+
+## 🗺️ Adding sources
+
+| Source | What you type | Example |
+| --- | --- | --- |
+| archive.org item | The ID after `archive.org/details/` | `homebrew-console-pack` |
+| Web folder | An `http(s)://` address that shows a file list | `https://myserver.local/roms/psx/` |
+| FTP folder | An `ftp://` address, with a login if needed | `ftp://user:password@192.168.1.20/roms/` |
+
+Open **Repositories > + Add a repository**, type the address (**L** shows symbols such as `: / . @`), and pick a console or **Multi-console pack**. A pop-up shows what was found: **Save**, **Edit** or **Cancel**.
+
+Sources live in `RomManager/repos.txt`, so you can also set them up on a PC:
 
 ```text
-   /SDCARD/App/RomManager/
-
+# CONSOLE | SOURCE | FORMAT (optional extra file types)
+MD  | homebrew-console-pack
+PS  | ftp://user:password@192.168.1.20/psx/ | chd
+*   | https://myserver.local/roms/
 ```
 
-3. Unmount your SD card safely, slide it into your Miyoo Mini / Plus, boot up the handheld, and launch it straight from your Apps selection page. OnionOS will automatically configure execution permissions on first launch.
+`CONSOLE` is Onion's ROM folder name (`PS`, `MD`, `MS`, `PCE`, `NEOGEO`...), or `*` for a pack.
 
----
+## 🎮 Controls
 
-## 🎮 Handheld Control Layout Reference
-
-| Hardware Key | Navigation Menu Context | On-Screen Keyboard Context |
+| Button | Game lists | Keyboard |
 | --- | --- | --- |
-| **D-Pad Up / Down** | Scroll highlighted list option indices | Move cursor across 2D matrix selection cursor |
-| **D-Pad Left / Right** | Page flip skip list blocks up or down | Move cursor across 2D matrix selection cursor |
-| **Button A** | Confirm Selection / Trigger Download / Start Scrape | Write highlighted text token to string |
-| **Button B** | Return to previous state layer view | Delete trailing string buffer character |
-| **Start** | Toggle Selected Game into Favorites / Unfavorite | Commit active text search query to index |
-| **Select** | Launch search matrix interface panel | Wipe active search query block and close layer |
-| **Button Y** | Delete file permanently (Local directory view only) | N/A |
-| **Button X** | Clear active search cache lists back to default | Close layer / Save active input variables |
-| **R / R1** | N/A | Toggle global case formatting options |
+| **D-Pad** | Move (list: left / right jump a page; cover flow: up / down jump) | Move |
+| **L2 / R2** | Previous / next letter | - |
+| **A** | Download / Play | Type |
+| **B** | Back | Delete a letter |
+| **X** | Download lists: re-read the sources. Installed: get the box art | Done |
+| **Y** | Download lists: sort & filter. Installed: delete the game | - |
+| **Start** | Add / remove favorite | Done, or accept the suggestion |
+| **Select** | Search | Cancel |
+| **R** | List / cover flow | Capitals |
+| **L** | - | Space (search) / symbols (addresses) |
+| **Menu** | Onion's game switcher | Onion's game switcher |
 
----
+**Home screen:** **X** opens the download queue; **B** twice exits.
+**Repositories:** **A** add or edit, **Y** remove, **X** file format, **Select** move to another console, **Start** review a pack.
 
-## ⚙️ Operational Suffix Modifiers (`settings.ini`)
+## ⚙️ Settings
 
-Internal app settings configure automatically through your system configurations screen or can be edited directly inside `settings.ini`:
+| Setting | What it does |
+| --- | --- |
+| Music Volume / Sound Effects | Volume bars from off to full |
+| Home Screen | Big tiles or a plain list |
+| Animations | On or off |
+| Open To | What RomManager opens on from Onion: Main Menu, Installed ROMs, or where you left off. Back from a game, it always returns where you were. |
+| Default Launcher | Games started here, and B in Onion's game switcher, come back to RomManager while it's open |
+| List Rows | How many rows a list shows |
+| Auto Scrape Covers | Download box art with every game |
+| Repo Cache | How many days source lists are kept before being read again |
+| Tools | Scrape Missing Box Art, Prefetch Repo Previews, Manage Preview Cache, Clear Repo Cache, Rebuild Local Database |
+| Credits & About | Who made RomManager |
 
-* `BGM_ENABLED` / `SFX_ENABLED`: Set to `1` (Active) or `0` (Disabled) to rule operational sound cards.
-* `UI_MAX_ITEMS`: Numeric rendering constraint setting the max listing lines loaded per frame canvas.
-* `AUTO_SCRAPE`: Set to `1` to instantly drop into a Libretro box art download pass the second a ROM file finishes streaming down.
-* `REPO_CACHE_DAYS`: Integer setting how many days a compiled network directory index stays valid before verifying with the server again.
+`settings.ini` only: `PREVIEW_CACHE_MB` (space for preview covers, default 40), `AUDIO_OUT` (`auto` or `dsp`, if sound doesn't work on your setup), `SHOW_PERF=1` (frames per second and CPU use on screen).
 
----
+## 🛠️ Building
 
-## 🤝 Acknowledgments
+RomManager is a shell script plus three small C programs in `src/`: `rmui` (the screen engine), `rmkey` (buttons) and `rmaudio` (the sound mixer).
 
-This entire project was designed, built, tested, and debugged solo as an ADHD special interest after realizing something like this didn't exist.
+- `sh src/rmui/build.sh` builds them for the Mini with a Linaro GCC 8.2 ARM toolchain in `tools/miyoo-toolchain`.
+- `sh src/rmui/build.sh preview` builds a PC version that draws screens to PNG files, for working without the device.
 
-Shout out to the open-source emulation developers whose documentation made things possible.
+## 🤝 Credits
 
-Developed by **plusCloud**
+**RomManager is made by plusCloud** - designed, built, tested and debugged as an ADHD special interest after realizing nothing like it existed: the app, the screen, button and sound engines, sources, downloads and the look.
 
+**Contributions by [brenonsc](https://github.com/brenonsc):** automatic file-format detection, bulk cover prefetching, choosing which consoles' cached previews to delete, `.cue` downloads for disc games, case-insensitive archive.org IDs, and reliability fixes.
+
+**Icons** by **Bernig**.
+
+**Also:** box art from the Libretro thumbnails project; `stb_image` / `stb_truetype` by Sean Barrett; `minimp3`; and the OnionOS team.
+
+## ⚖️ Disclaimer
+
+RomManager doesn't include, host or link to any games - it downloads only from the sources you add. Only download games you own, and follow the copyright laws where you live. RomManager isn't affiliated with any console maker or with OnionOS.
